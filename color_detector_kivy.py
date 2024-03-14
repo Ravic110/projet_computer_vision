@@ -10,12 +10,19 @@ from kivy.graphics.texture import Texture
 IMAGE_FILE = "colorpic.jpg"
 COLORS_FILE = "colors.csv"
 
+
 class ColorIdentifier:
     def __init__(self, colors_file):
         self.color_dataset = self.load_color_dataset(colors_file)
 
     def load_color_dataset(self, colors_file):
-        return pd.read_csv(colors_file, names=["color", "hex", "r", "g", "b"], dtype={"color": str, "hex": str, "r": np.uint8, "g": np.uint8, "b": np.uint8})
+        return pd.read_csv(colors_file,
+                           names=["color", "hex", "r", "g", "b"],
+                           dtype={"color": str,
+                                  "hex": str,
+                                  "r": np.uint8,
+                                  "g": np.uint8,
+                                  "b": np.uint8})
 
     def get_color_name(self, r, g, b):
         def get_color_name(self, r, g, b):
@@ -30,6 +37,7 @@ class ColorIdentifier:
                 color_name = self.color_dataset.iloc[closest_color_index]["color"]
             print(color_name)
             return color_name
+
 
 class ColorIdentifierApp(App):
     def build(self):
@@ -71,6 +79,7 @@ class ColorIdentifierApp(App):
 
             color_name = self.color_identifier.get_color_name(int(r * 255), int(g * 255), int(b * 255))
             print(f"Color name: {color_name}")
+
 
 if __name__ == "__main__":
     ColorIdentifierApp().run()

@@ -6,9 +6,9 @@ from PIL import Image, ImageTk
 
 class TextRecognitionApp:
 
-    def __init__(self, root):
+    def __init__(self, main):
         self.cap = None
-        self.root = root
+        self.root = main
         self.root.title("Text Recognition")
 
         #  interface
@@ -31,7 +31,7 @@ class TextRecognitionApp:
         self.start_button = tk.Button(self.espacement,
                                       text="start",
                                       command=self.start_capture,
-                                      padx=12, pady=7, bd=5,
+                                      padx=12, pady=7, bd=3,
                                       font=("Arial", 10, "bold"),
                                       background="#5AE3B1",
                                       relief="groove")
@@ -41,7 +41,7 @@ class TextRecognitionApp:
         self.stop_button = tk.Button(self.espacement,
                                      text="stop",
                                      command=self.stop_capture,
-                                     padx=12, pady=7, bd=5,
+                                     padx=12, pady=7, bd=3,
                                      font=("Arial", 10, "bold"),
                                      relief="groove",
                                      background="#CA3074")
@@ -63,8 +63,8 @@ class TextRecognitionApp:
         self.image_label.pack()
 
         self.state = tk.Frame(self.main_frame,
-                                   pady=8, padx=5,
-                                   bg="white")
+                              pady=8, padx=5,
+                              bg="white")
         self.state.pack()
         self.status_bar = tk.Label(self.state,
                                    text="start capture",
@@ -95,10 +95,12 @@ class TextRecognitionApp:
     def start_capture(self):
         self.get_video_source()
         self.status_bar.config(text="start capture", background="#5AE3B1")
+        self.result_frame.config(background="#5AE3B1")
 
     def stop_capture(self):
         self.cap.release()
         self.status_bar.config(text="stop capture", background="#CA3074")
+        self.result_frame.config(background="#CA3074")
 
     def update_frame(self):
         ret, frame = self.cap.read()
@@ -131,13 +133,14 @@ class TextRecognitionApp:
     def filter_text(self, text):
         return [t for t in text if t[2] > self.threshold]
 
-    def draw_boxes(self, frame, text):
+    @staticmethod
+    def draw_boxes(frame, text):
         for detection in text:
             bbox, detected_text, confidence = detection
             bbox = [(int(pt[0]), int(pt[1]))
                     for pt in bbox]
-            cv2.rectangle(frame, bbox[0], bbox[1], (0, 255, 0), 2)
-            cv2.putText(frame, detected_text, bbox[0], cv2.FONT_HERSHEY_DUPLEX, 1, (0, 0, 255), 2)
+            cv2.rectangle(frame, bbox[0], bbox[1], (0, 150, 0), 2)
+            cv2.putText(frame, detected_text, bbox[0], cv2.FONT_HERSHEY_DUPLEX, 1, (0, 0, 150), 2)
         return frame
 
     def on_closing(self):

@@ -28,11 +28,19 @@ class ColorIdentifier:
     @staticmethod
     def load_color_dataset(colors_file):
         # Utilisation de dtype pour optimiser les types de données
-        return pd.read_csv(colors_file, names=["color", "hex", "r", "g", "b"], dtype={"color": str, "hex": str, "r": np.uint8, "g": np.uint8, "b": np.uint8})
+        return pd.read_csv(colors_file,
+                           names=["color", "hex", "r", "g", "b"],
+                           dtype={"color": str,
+                                  "hex": str,
+                                  "r": np.uint8,
+                                  "g": np.uint8,
+                                  "b": np.uint8})
 
     def get_color_name(self, r, g, b):
         color_values = self.color_dataset[["r", "g", "b"]].values.astype(np.uint8)
-        color_distances = np.sum(np.abs(color_values - np.array([r, g, b], dtype=np.uint8)), axis=1)
+        color_distances = np.sum(np.abs(color_values - np.array([r, g, b],
+                                                                dtype=np.uint8)),
+                                 axis=1)
         closest_color_index = np.argmin(color_distances)
         return self.color_dataset.iloc[closest_color_index]["color"]
 
@@ -43,17 +51,25 @@ class ColorIdentifier:
                 color_name = self.get_color_name(r, g, b)
                 print(color_name)
                 self.selected_color_name = color_name
-                cv2.putText(self.image, color_name, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+                cv2.putText(self.image,
+                            color_name, (x, y),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.5, (255, 255, 255), 2)
 
     def create_sidebar(self):
         sidebar_width = 200
         sidebar_height = self.image.shape[0]
 
         sidebar = np.zeros((sidebar_height, sidebar_width, 3), dtype=np.uint8)
-        cv2.putText(sidebar, "Selected Color:", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        cv2.putText(sidebar, "Selected Color:",
+                    (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5, (255, 255, 255), 1)
 
         if self.selected_color_name is not None:
-            cv2.putText(sidebar, self.selected_color_name, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            cv2.putText(sidebar, self.selected_color_name,
+                        (10, 60), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5, (255, 255, 255), 1)
 
         return sidebar
 
