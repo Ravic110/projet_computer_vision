@@ -1,8 +1,9 @@
 import cv2
 import easyocr
 import tkinter as tk
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 from PIL import Image, ImageTk
+import os  # Pour gérer les chemins
 import numpy as np
 
 
@@ -10,91 +11,110 @@ class TextRecognitionApp:
     def __init__(self, main):
         self.cap = None
         self.root = main
-        self.root.title("Text Recognition")
+        self.root.title("Text Recognition App")
+        self.root.geometry("800x600")
+        self.root.resizable(True, True)
+        self.root.configure(bg="#F0F0F0")
 
-        # Interface utilisateur
-        self.main_frame = tk.Frame(self.root, bg="white", padx=10, pady=10)
-        self.main_frame.pack()
+        # Gestion des chemins
+        self.assets_dir = os.path.join(os.path.dirname(__file__), "assets")
+        self.icon_path = os.path.join(self.assets_dir, "icon.ico")
+        self.results_file = os.path.join(self.assets_dir, "detected_text_results.txt")
 
-        self.title_label = tk.Label(self.main_frame, text="Text Recognition", font=("Arial", 18), bg="#63BFF3")
-        self.title_label.pack()
+        # Vérifier si les fichiers nécessaires existent
+        if not os.path.exists(self.icon_path):
+            messagebox.showerror("Error", "Icon file not found in the 'assets' folder.")
+            self.root.destroy()
+            return
 
-        self.espacement = tk.Frame(self.main_frame, pady=8, padx=5, bg="white")
-        self.espacement.pack()
+        # Ajout d'une icône personnalisée
+        self.root.iconbitmap(self.icon_path)
+
+        # Cadre principal
+        self.main_frame = tk.Frame(self.root, bg="#FFFFFF", bd=2, relief="groove")
+        self.main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Titre
+        self.title_label = tk.Label(
+            self.main_frame, text="Text Recognition", font=("Arial", 24, "bold"), bg="#63BFF3", fg="#FFFFFF", pady=10
+        )
+        self.title_label.pack(fill="x")
+
+        # Boutons de contrôle
+        self.control_frame = tk.Frame(self.main_frame, bg="#F0F0F0")
+        self.control_frame.pack(fill="x", pady=10)
 
         self.start_button = tk.Button(
-            self.espacement, text="Start", command=self.start_capture, padx=12, pady=7, bd=3,
-            font=("Arial", 10, "bold"), background="#5AE3B1", relief="groove"
+            self.control_frame, text="Start Capture", command=self.start_capture, font=("Arial", 12, "bold"),
+            bg="#5AE3B1", fg="#FFFFFF", activebackground="#4AA57C", relief="ridge", padx=10, pady=5
         )
-        self.start_button.pack(side=tk.LEFT)
+        self.start_button.pack(side="left", padx=5)
 
         self.stop_button = tk.Button(
-            self.espacement, text="Stop", command=self.stop_capture, padx=12, pady=7, bd=3,
-            font=("Arial", 10, "bold"), relief="groove", background="#CA3074"
+            self.control_frame, text="Stop Capture", command=self.stop_capture, font=("Arial", 12, "bold"),
+            bg="#CA3074", fg="#FFFFFF", activebackground="#A02458", relief="ridge", padx=10, pady=5
         )
-        self.stop_button.pack(side=tk.RIGHT)
+        self.stop_button.pack(side="left", padx=5)
 
-        self.video_source = tk.StringVar()
-        self.video_source.set("Webcam")
+        self.save_button = tk.Button(
+            self.control_frame, text="Save Results", command=self.save_results, font=("Arial", 12, "bold"),
+            bg="#FFA500", fg="#FFFFFF", activebackground="#CC8400", relief="ridge", padx=10, pady=5
+        )
+        self.save_button.pack(side="left", padx=5)
 
-        self.source_select = tk.OptionMenu(self.main_frame, self.video_source, "Webcam", "Choose File...")
-        self.source_select.pack()
+        self.about_button = tk.Button(
+            self.control_frame, text="About", command=self.show_about, font=("Arial", 12, "bold"),
+            bg="#4A90E2", fg="#FFFFFF", activebackground="#3A70B2", relief="ridge", padx=10, pady=5
+        )
+        self.about_button.pack(side="right", padx=5)
 
-        self.result_frame = tk.Frame(self.main_frame, bg="#5AE3B1", padx=4, pady=5)
-        self.result_frame.pack()
+        # Vidéo et résultats
+        self.result_frame = tk.Frame(self.main_frame, bg="#DDEEFF", bd=2, relief="sunken")
+        self.result_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
-        self.image_label = tk.Label(self.result_frame)
-        self.image_label.pack()
+        self.image_label = tk.Label(self.result_frame, bg="#DDEEFF")
+        self.image_label.pack(fill="both", expand=True)
 
-        self.state = tk.Frame(self.main_frame, pady=8, padx=5, bg="white")
-        self.state.pack()
-        self.status_bar = tk.Label(self.state, text="Start capture", font=("Arial", 12), bg="#5AE3B1")
-        self.status_bar.pack()
+        # Barre de statut
+        self.status_bar = tk.Label(
+            self.root, text="Ready", font=("Arial", 10, "italic"), bg="#63BFF3", fg="#FFFFFF", relief="ridge", anchor="w"
+        )
+        self.status_bar.pack(side="bottom", fill="x")
 
-        # Initialisation de la reconnaissance
+        # Initialisation EasyOCR
         self.reader = easyocr.Reader(['en', 'fr'], gpu=True)
         self.threshold = 0.25
-
         self.frame_counter = 0
         self.detected_text = []
 
+        # Mise à jour des frames
         self.update_frame()
 
-        # Fermeture de la fenêtre
+        # Gestion de la fermeture
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
-
-    def get_video_source(self):
-        try:
-            if self.video_source.get() == "Webcam":
-                self.cap = cv2.VideoCapture(0)
-            elif self.video_source.get() == "Choose File...":
-                file_path = filedialog.askopenfilename(filetypes=[("Video Files", "*.mp4;*.avi;*.mov")])
-                if file_path:
-                    self.cap = cv2.VideoCapture(file_path)
-                else:
-                    raise Exception("No file selected.")
-            if not self.cap or not self.cap.isOpened():
-                raise Exception("Unable to open video source.")
-        except Exception as e:
-            print(f"Error: {e}")
-            self.status_bar.config(text=f"Error: {e}", background="#CA3074")
 
     def start_capture(self):
         self.get_video_source()
-        self.status_bar.config(text="Capturing started", background="#5AE3B1")
-        self.result_frame.config(background="#5AE3B1")
+        self.status_bar.config(text="Capturing started", bg="#5AE3B1")
 
     def stop_capture(self):
         if self.cap and self.cap.isOpened():
             self.cap.release()
-        self.status_bar.config(text="Capturing stopped", background="#CA3074")
-        self.result_frame.config(background="#CA3074")
+        self.status_bar.config(text="Capture stopped", bg="#CA3074")
         self.image_label.config(image=None)
+
+    def get_video_source(self):
+        try:
+            self.cap = cv2.VideoCapture(0)
+            if not self.cap or not self.cap.isOpened():
+                raise Exception("Unable to open video source.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error: {e}")
+            self.status_bar.config(text="Error opening video source", bg="#CA3074")
 
     def update_frame(self):
         if self.cap and self.cap.isOpened():
             ret, frame = self.cap.read()
-
             if ret:
                 self.frame_counter += 1
                 if self.frame_counter % 5 == 0:  # Process every 5th frame
@@ -120,22 +140,34 @@ class TextRecognitionApp:
             bbox, detected_text, confidence = detection
             bbox = [(int(pt[0]), int(pt[1])) for pt in bbox]
 
-            # Calculate color of the text region
             x1, y1 = bbox[0]
             x2, y2 = bbox[2]
-            roi = frame[y1:y2, x1:x2]  # Region of interest
-            avg_color = cv2.mean(roi)[:3]  # Average color (BGR)
+            roi = frame[y1:y2, x1:x2]
+            avg_color = cv2.mean(roi)[:3]
 
-            # Draw the bounding box
-            cv2.polylines(frame, [np.array(bbox, dtype=np.int32)], isClosed=True, color=(0, 150, 0), thickness=2)
+            cv2.polylines(frame, [np.array(bbox, dtype=np.int32)], isClosed=True, color=(0, 255, 0), thickness=2)
             cv2.putText(
                 frame, f"{detected_text} ({int(avg_color[2])},{int(avg_color[1])},{int(avg_color[0])})",
-                bbox[0], cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1
+                bbox[0], cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2
             )
         return frame
 
+    def save_results(self):
+        if self.detected_text:
+            with open(self.results_file, "w") as f:
+                for detection in self.detected_text:
+                    f.write(f"{detection[1]} (Confidence: {detection[2]:.2f})\n")
+            messagebox.showinfo("Success", f"Results saved successfully in {self.results_file}.")
+        else:
+            messagebox.showwarning("Warning", "No results to save.")
+
+    def show_about(self):
+        messagebox.showinfo(
+            "About", "Text Recognition App\n\nDeveloped using OpenCV, EasyOCR, and Tkinter.\n"
+                     "Detect and recognize text in real-time with added color detection."
+        )
+
     def on_closing(self):
-        print("Closing the application")
         if self.cap:
             self.cap.release()
         self.root.destroy()
