@@ -42,14 +42,15 @@ def test_ocr_engine_init_with_settings(settings: AppSettings) -> None:
 
 
 def test_ocr_engine_detect_text_success(engine: OCREngine) -> None:
-    frame = MagicMock()
+    import numpy as np
+    frame = np.zeros((100, 200, 3), dtype=np.uint8)
     mock_reader = MagicMock()
     mock_reader.readtext.return_value = [
-        ([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], "hello", 0.9),
-        ([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], "low", 0.1),
+        ([[0.0, 0.0], [100.0, 0.0], [100.0, 50.0], [0.0, 50.0]], "hello", 0.9),
+        ([[0.0, 0.0], [100.0, 0.0], [100.0, 50.0], [0.0, 50.0]], "low", 0.1),
     ]
 
-    with patch("easyocr.Reader", return_value=mock_reader):
+    with patch.object(engine, "_get_reader", return_value=mock_reader):
         result = engine.detect_text(frame, languages=["en"], threshold=0.5)
 
     assert result.success is True
@@ -58,9 +59,10 @@ def test_ocr_engine_detect_text_success(engine: OCREngine) -> None:
 
 
 def test_ocr_engine_detect_text_failure(engine: OCREngine) -> None:
-    frame = MagicMock()
+    import numpy as np
+    frame = np.zeros((100, 200, 3), dtype=np.uint8)
 
-    with patch("easyocr.Reader", side_effect=RuntimeError("model error")):
+    with patch.object(engine, "_get_reader", side_effect=RuntimeError("model error")):
         result = engine.detect_text(frame, languages=["en"])
 
     assert result.success is False
@@ -69,21 +71,25 @@ def test_ocr_engine_detect_text_failure(engine: OCREngine) -> None:
 
 
 def test_ocr_engine_model_caching(engine: OCREngine) -> None:
+    import numpy as np
+    frame = np.zeros((100, 200, 3), dtype=np.uint8)
     mock_reader = MagicMock()
 
     with patch("easyocr.Reader", return_value=mock_reader):
-        engine.detect_text(MagicMock(), languages=["en"])
-        engine.detect_text(MagicMock(), languages=["en"])
+        engine.detect_text(frame, languages=["en"])
+        engine.detect_text(frame, languages=["en"])
 
     assert engine.cache_size == 1
     assert mock_reader.readtext.call_count == 2
 
 
 def test_ocr_engine_cache_clearing(engine: OCREngine) -> None:
+    import numpy as np
+    frame = np.zeros((100, 200, 3), dtype=np.uint8)
     mock_reader = MagicMock()
 
     with patch("easyocr.Reader", return_value=mock_reader):
-        engine.detect_text(MagicMock(), languages=["en"])
+        engine.detect_text(frame, languages=["en"])
 
     assert engine.cache_size == 1
     engine.clear_cache()

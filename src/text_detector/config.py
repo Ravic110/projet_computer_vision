@@ -38,9 +38,11 @@ class AppSettings:
     max_confidence: float = 0.8
     default_confidence: float = 0.25
     confidence_resolution: float = 0.05
-    frame_skip: int = 30
+    frame_skip: int = 15
     max_history: int = 100
     gpu_enabled: bool = False
+    ocr_max_width: int = 800
+    paragraph_merge: bool = False
 
     def __post_init__(self) -> None:
         if not (0.0 <= self.min_confidence <= 1.0):

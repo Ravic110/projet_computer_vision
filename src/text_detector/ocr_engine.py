@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from text_detector.config import AppSettings
+from text_detector.image_processor import resize_frame_for_ocr, scale_detections
 from text_detector.utils.logging_setup import get_logger
 
 logger = get_logger("ocr_engine")
@@ -136,10 +137,15 @@ class OCREngine:
 
         try:
             reader = self._get_reader(langs)
-            raw_results = reader.readtext(frame)
+            ocr_frame, scale = resize_frame_for_ocr(frame, self._settings.ocr_max_width)
+            raw_results = reader.readtext(
+                ocr_frame,
+                paragraph=self._settings.paragraph_merge,
+            )
             detections = [
                 item for item in raw_results if item[2] >= conf_threshold
             ]
+            detections = scale_detections(detections, 1.0 / scale)
             return DetectionResult(detections=detections, languages=langs)
         except Exception as e:
             logger.error("OCR detection failed: %s", e)

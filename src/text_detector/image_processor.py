@@ -6,6 +6,60 @@ import numpy as np
 Detection = tuple[list[list[float]], str, float]
 
 
+def resize_frame_for_ocr(
+    frame: np.ndarray,
+    max_width: int = 800,
+) -> tuple[np.ndarray, float]:
+    """Resize a frame for faster OCR processing.
+
+    If the frame width exceeds max_width, it is scaled down proportionally.
+    Small frames are left unchanged.
+
+    Args:
+        frame: OpenCV image array (BGR).
+        max_width: Maximum width for OCR input.
+
+    Returns:
+        Tuple of (resized frame, scale factor).
+        Scale factor is 1.0 if no resizing occurred.
+    """
+    height, width = frame.shape[:2]
+    if width <= max_width:
+        return frame, 1.0
+
+    scale = max_width / width
+    new_width = max_width
+    new_height = int(height * scale)
+    resized = cv2.resize(frame, (new_width, new_height), interpolation=cv2.INTER_AREA)
+    return resized, scale
+
+
+def scale_detections(
+    detections: list[Detection],
+    scale: float,
+) -> list[Detection]:
+    """Scale bounding box coordinates back to original frame size.
+
+    Args:
+        detections: List of (bbox, text, confidence) tuples from EasyOCR.
+        scale: The inverse of the resize scale (1/resize_factor).
+
+    Returns:
+        List of detections with scaled bounding boxes.
+    """
+    if scale == 1.0:
+        return detections
+
+    return [
+        (
+            [[pt[0] * scale, pt[1] * scale] for pt in bbox],
+            text,
+            confidence,
+        )
+        for bbox, text, confidence in detections
+    ]
+
+
 def filter_text(
     detections: list[Detection],
     threshold: float,

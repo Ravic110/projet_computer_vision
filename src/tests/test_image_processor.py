@@ -7,6 +7,8 @@ from text_detector.image_processor import (
     compute_avg_color,
     draw_boxes_with_colors,
     filter_text,
+    resize_frame_for_ocr,
+    scale_detections,
 )
 
 
@@ -75,3 +77,30 @@ def test_bgr_to_rgb_conversion() -> None:
     result = bgr_to_rgb(frame)
     assert result[0, 0, 0] == 255  # RGB: Red channel
     assert result[0, 0, 2] == 0    # RGB: Blue channel
+
+
+def test_resize_frame_for_ocr_no_resize_needed() -> None:
+    frame = np.zeros((100, 400, 3), dtype=np.uint8)
+    result, scale = resize_frame_for_ocr(frame, max_width=800)
+    assert scale == 1.0
+    assert result.shape == frame.shape
+
+
+def test_resize_frame_for_ocr_resizes_large_frame() -> None:
+    frame = np.zeros((600, 1600, 3), dtype=np.uint8)
+    result, scale = resize_frame_for_ocr(frame, max_width=800)
+    assert result.shape[1] == 800
+    assert scale < 1.0
+
+
+def test_scale_detections_no_scale() -> None:
+    dets = [_make_detection("test", 0.9)]
+    result = scale_detections(dets, scale=1.0)
+    assert result == dets
+
+
+def test_scale_detections_applies_factor() -> None:
+    dets = [_make_detection("test", 0.9)]
+    result = scale_detections(dets, scale=2.0)
+    assert result[0][0][0][0] == 20.0  # 10.0 * 2.0
+    assert result[0][1] == "test"
