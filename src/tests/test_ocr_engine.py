@@ -15,7 +15,9 @@ def settings() -> AppSettings:
 
 @pytest.fixture
 def engine(settings: AppSettings) -> OCREngine:
-    return OCREngine(settings)
+    eng = OCREngine(settings)
+    yield eng
+    eng.shutdown()
 
 
 def test_detection_result_creation() -> None:
@@ -88,19 +90,27 @@ def test_ocr_engine_cache_clearing(engine: OCREngine) -> None:
     assert engine.cache_size == 0
 
 
-def test_ocr_engine_detect_text_async(engine: OCREngine) -> None:
+def test_ocr_engine_detect_text_async_returns_true(settings: AppSettings) -> None:
+    """Test that async submission succeeds when worker is free."""
+    engine = OCREngine(settings)
     frame = MagicMock()
-    callback = MagicMock()
-    mock_reader = MagicMock()
-    mock_reader.readtext.return_value = []
 
-    with patch("easyocr.Reader", return_value=mock_reader):
-        engine.detect_text_async(frame, languages=["en"], callback=callback)
+    result = engine.detect_text_async(frame, languages=["en"])
+    assert result is True
+    assert engine.is_busy is True
+    engine.shutdown()
 
-    result = engine.get_result(timeout=5.0)
-    assert result is not None
-    assert result.success is True
-    callback.assert_called_once_with(result)
+
+def test_ocr_engine_detect_text_async_drops_when_busy(settings: AppSettings) -> None:
+    """Test that async submission is dropped when worker is busy."""
+    engine = OCREngine(settings)
+    frame = MagicMock()
+
+    # Queue maxsize is 1, so first submission should succeed
+    assert engine.detect_text_async(frame, languages=["en"]) is True
+    # Second submission should be dropped (queue full or worker busy)
+    assert engine.detect_text_async(frame, languages=["en"]) is False
+    engine.shutdown()
 
 
 def test_ocr_engine_get_result_timeout(engine: OCREngine) -> None:

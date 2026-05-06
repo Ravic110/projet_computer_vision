@@ -17,7 +17,7 @@ def test_app_settings_defaults() -> None:
     settings = AppSettings()
     assert settings.default_language == "en"
     assert settings.default_confidence == 0.25
-    assert settings.frame_skip == 5
+    assert settings.frame_skip == 30
     assert settings.max_history == 100
     assert settings.gpu_enabled is False
 

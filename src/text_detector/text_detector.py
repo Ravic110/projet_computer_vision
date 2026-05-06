@@ -256,18 +256,22 @@ class TextRecognitionApp:
         if self.current_frame is None:
             return
 
+        if self.engine.is_busy:
+            return
+
         def _on_result(result: DetectionResult) -> None:
             with self.ocr_lock:
                 self.ocr_result = result
             self.root.after(0, self._apply_ocr_result)
 
-        self.engine.detect_text_async(
+        queued = self.engine.detect_text_async(
             self.current_frame,
             languages=[self.current_language],
             threshold=self.threshold_var.get(),
             callback=_on_result,
         )
-        self.status_bar.config(text="Processing...", bg=THEME.warning)
+        if queued:
+            self.status_bar.config(text="Processing...", bg=THEME.warning)
 
     def _apply_ocr_result(self) -> None:
         with self.ocr_lock:
@@ -401,8 +405,9 @@ class TextRecognitionApp:
         )
 
     def on_closing(self) -> None:
+        self.capture_active = False
         if self.cap is not None:
             self.cap.release()
-        self.engine.clear_cache()
+        self.engine.shutdown()
         self.root.destroy()
         logger.info("Application closed")
