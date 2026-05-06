@@ -3,7 +3,10 @@
 import queue
 import threading
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
+
+import numpy as np
 
 from text_detector.config import AppSettings
 from text_detector.image_processor import resize_frame_for_ocr, scale_detections
@@ -13,21 +16,17 @@ logger = get_logger("ocr_engine")
 
 _MAX_CACHE_SIZE = 2
 
+BBox = list[list[float]]
+Detection = tuple[BBox, str, float]
 
+
+@dataclass
 class DetectionResult:
     """Container for OCR detection results."""
-
-    def __init__(
-        self,
-        detections: list[tuple[list[list[float]], str, float]],
-        languages: list[str],
-        success: bool = True,
-        error: str | None = None,
-    ) -> None:
-        self.detections = detections
-        self.languages = languages
-        self.success = success
-        self.error = error
+    detections: list[Detection]
+    languages: list[str]
+    success: bool = True
+    error: str | None = None
 
 
 class OCREngine:
@@ -118,7 +117,7 @@ class OCREngine:
 
     def detect_text(
         self,
-        frame,
+        frame: np.ndarray,
         languages: list[str] | None = None,
         threshold: float | None = None,
     ) -> DetectionResult:
@@ -156,7 +155,7 @@ class OCREngine:
 
     def detect_text_async(
         self,
-        frame,
+        frame: np.ndarray,
         languages: list[str] | None = None,
         threshold: float | None = None,
         callback: Callable[[DetectionResult], None] | None = None,
