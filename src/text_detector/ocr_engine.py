@@ -2,7 +2,8 @@
 
 import queue
 import threading
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from text_detector.config import AppSettings
 from text_detector.utils.logging_setup import get_logger

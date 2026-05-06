@@ -30,7 +30,9 @@ class ThemeColors:
 @dataclass
 class AppSettings:
     """Application settings with validation."""
-    available_languages: list[str] = field(default_factory=lambda: ["en", "fr", "de", "es", "it", "pt"])
+    available_languages: list[str] = field(
+        default_factory=lambda: ["en", "fr", "de", "es", "it", "pt"]
+    )
     default_language: str = "en"
     min_confidence: float = 0.05
     max_confidence: float = 0.8

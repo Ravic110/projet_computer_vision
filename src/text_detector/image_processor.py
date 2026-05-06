@@ -3,7 +3,6 @@
 import cv2
 import numpy as np
 
-
 Detection = tuple[list[list[float]], str, float]
 
 

@@ -1,11 +1,16 @@
 """Tests for utility modules."""
 
-from pathlib import Path
 import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
-from text_detector.utils.path_helpers import get_assets_dir, ensure_dir, get_safe_path, get_project_root
-from text_detector.utils.logging_setup import setup_logging, get_logger
+from text_detector.utils.logging_setup import get_logger, setup_logging
+from text_detector.utils.path_helpers import (
+    ensure_dir,
+    get_assets_dir,
+    get_project_root,
+    get_safe_path,
+)
 
 
 def test_get_project_root_returns_path() -> None:

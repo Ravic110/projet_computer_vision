@@ -1,5 +1,6 @@
 """GUI application for real-time text recognition."""
 
+import contextlib
 import csv
 import json
 import threading
@@ -54,10 +55,8 @@ class TextRecognitionApp:
     def _configure_icon(self) -> None:
         icon_path = get_assets_dir() / "icon.ico"
         if icon_path.exists():
-            try:
+            with contextlib.suppress(tk.TclError):
                 self.root.iconbitmap(str(icon_path))
-            except tk.TclError:
-                pass
 
     def _create_widgets(self) -> None:
         self.main_frame = tk.Frame(self.root, bg=THEME.frame_bg, bd=2, relief="groove")
@@ -133,7 +132,9 @@ class TextRecognitionApp:
         self.settings_frame = tk.Frame(self.main_frame, bg=THEME.background)
         self.settings_frame.pack(fill="x", pady=5)
 
-        tk.Label(self.settings_frame, text="OCR Language:", bg=THEME.background).pack(side="left", padx=(5, 0))
+        tk.Label(
+            self.settings_frame, text="OCR Language:", bg=THEME.background
+        ).pack(side="left", padx=(5, 0))
         self.language_menu = tk.OptionMenu(
             self.settings_frame,
             self.language_var,
@@ -142,7 +143,9 @@ class TextRecognitionApp:
         )
         self.language_menu.pack(side="left", padx=5)
 
-        tk.Label(self.settings_frame, text="Confidence threshold:", bg=THEME.background).pack(side="left", padx=(10, 0))
+        tk.Label(
+            self.settings_frame, text="Confidence threshold:", bg=THEME.background
+        ).pack(side="left", padx=(10, 0))
         self.threshold_scale = tk.Scale(
             self.settings_frame,
             variable=self.threshold_var,
@@ -165,7 +168,9 @@ class TextRecognitionApp:
         self.gpu_check.pack(side="left", padx=10)
 
     def _create_result_frame(self) -> None:
-        self.result_frame = tk.Frame(self.main_frame, bg=THEME.result_frame_bg, bd=2, relief="sunken")
+        self.result_frame = tk.Frame(
+            self.main_frame, bg=THEME.result_frame_bg, bd=2, relief="sunken"
+        )
         self.result_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
         self.image_label = tk.Label(self.result_frame, bg=THEME.result_frame_bg)
@@ -299,16 +304,20 @@ class TextRecognitionApp:
         self.text_output.config(state="normal")
         self.text_output.delete("1.0", tk.END)
         if self.detected_text:
-            for bbox, text, confidence in self.detected_text:
+            for _bbox, text, confidence in self.detected_text:
                 self.text_output.insert(tk.END, f"{text} (confidence: {confidence:.2f})\n")
         else:
             self.text_output.insert(tk.END, "No text detected yet.\n")
         self.text_output.config(state="disabled")
 
     def _add_to_history(self) -> None:
-        for bbox, text, confidence in self.detected_text:
+        for _bbox, text, confidence in self.detected_text:
             self.history.append(
-                {"text": text, "confidence": round(confidence, 2), "language": self.current_language}
+                {
+                    "text": text,
+                    "confidence": round(confidence, 2),
+                    "language": self.current_language,
+                }
             )
         if len(self.history) > SETTINGS.max_history:
             self.history = self.history[-SETTINGS.max_history:]
@@ -352,14 +361,14 @@ class TextRecognitionApp:
 
     def _save_txt(self, path: Path) -> None:
         with open(path, "w", encoding="utf-8") as f:
-            for bbox, text, confidence in self.detected_text:
+            for _bbox, text, confidence in self.detected_text:
                 f.write(f"{text} (confidence: {confidence:.2f})\n")
 
     def _save_csv(self, path: Path) -> None:
         with open(path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow(["text", "confidence", "language"])
-            for bbox, text, confidence in self.detected_text:
+            for _bbox, text, confidence in self.detected_text:
                 writer.writerow([text, f"{confidence:.2f}", self.current_language])
 
     def _save_json(self, path: Path) -> None:

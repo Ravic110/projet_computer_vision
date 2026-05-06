@@ -10,7 +10,7 @@ def main() -> None:
     """Run the text recognition application."""
     setup_logging()
     root = tk.Tk()
-    app = TextRecognitionApp(root)
+    _app = TextRecognitionApp(root)
     root.mainloop()
 
 

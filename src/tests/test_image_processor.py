@@ -2,7 +2,12 @@
 
 import numpy as np
 
-from text_detector.image_processor import filter_text, compute_avg_color, draw_boxes_with_colors, bgr_to_rgb
+from text_detector.image_processor import (
+    bgr_to_rgb,
+    compute_avg_color,
+    draw_boxes_with_colors,
+    filter_text,
+)
 
 
 def _make_detection(text: str, confidence: float) -> tuple:

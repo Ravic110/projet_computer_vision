@@ -1,6 +1,5 @@
 """Tests for OCR engine module."""
 
-import queue
 from unittest.mock import MagicMock, patch
 
 import pytest
