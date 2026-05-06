@@ -12,40 +12,15 @@ import cv2
 import numpy as np
 from PIL import Image, ImageTk
 
-from text_detector.config import SETTINGS, THEME, ThemeableButton
+from text_detector.config import SETTINGS, THEME
 from text_detector.image_processor import bgr_to_rgb, draw_boxes_with_colors
 from text_detector.ocr_engine import DetectionResult, OCREngine
+from text_detector.settings_manager import SettingsManager
 from text_detector.utils.logging_setup import get_logger
 from text_detector.utils.path_helpers import get_assets_dir
+from text_detector.widgets import StatusLED, ThemeableButton
 
 logger = get_logger("gui")
-
-
-class StatusLED:
-    """A small circular status indicator widget."""
-
-    def __init__(self, master, color: str = THEME.status_ready, size: int = 12):
-        self.color = color
-        self.size = size
-        self.canvas = tk.Canvas(
-            master,
-            width=size,
-            height=size,
-            bg=THEME.background,
-            highlightthickness=0,
-        )
-        self._draw()
-
-    def _draw(self) -> None:
-        r = self.size // 2
-        self.canvas.create_oval(1, 1, r * 2 - 1, r * 2 - 1, fill=self.color, outline="")
-
-    def set_color(self, color: str) -> None:
-        self.color = color
-        self._draw()
-
-    def pack(self, **kwargs) -> None:
-        self.canvas.pack(**kwargs)
 
 
 class TextRecognitionApp:
@@ -58,6 +33,15 @@ class TextRecognitionApp:
         self.root.geometry("1200x720")
         self.root.resizable(True, True)
         self.root.configure(bg=THEME.background)
+
+        self._settings_manager = SettingsManager()
+        loaded = self._settings_manager.load()
+        SETTINGS.default_language = loaded.default_language
+        SETTINGS.default_confidence = loaded.default_confidence
+        SETTINGS.gpu_enabled = loaded.gpu_enabled
+        SETTINGS.frame_skip = loaded.frame_skip
+        SETTINGS.ocr_max_width = loaded.ocr_max_width
+        SETTINGS.paragraph_merge = loaded.paragraph_merge
 
         self.capture_active = False
         self.frame_counter = 0
@@ -235,6 +219,19 @@ class TextRecognitionApp:
             self.show_about,
             bg=THEME.surface_light,
             active_bg=THEME.about,
+            font="Arial",
+            font_size=10,
+            fill="x",
+            expand=True,
+            pady=4,
+        )
+
+        self.reset_btn = ThemeableButton(
+            self.sidebar,
+            "↺ Reset Settings",
+            self._reset_settings,
+            bg=THEME.surface_light,
+            active_bg=THEME.warning,
             font="Arial",
             font_size=10,
             fill="x",
@@ -454,15 +451,24 @@ class TextRecognitionApp:
 
     # ── Event handlers ──────────────────────────────────────────────
 
+    def _save_settings(self) -> None:
+        """Persist current settings to disk."""
+        SETTINGS.default_language = self.language_var.get()
+        SETTINGS.default_confidence = self.threshold_var.get()
+        SETTINGS.gpu_enabled = self.gpu_var.get()
+        self._settings_manager.save(SETTINGS)
+
     def _language_changed(self, value: str) -> None:
         self.language_var.set(value)
         self.current_language = value
         self.engine.clear_cache()
         self._set_status(f"Language: {value}", THEME.accent)
         logger.info("Language changed to %s", value)
+        self._save_settings()
 
     def _threshold_changed(self, value: str) -> None:
         self.threshold_label.config(text=f"{float(value):.2f}")
+        self._save_settings()
 
     def _gpu_changed(self) -> None:
         self.engine.clear_cache()
@@ -470,6 +476,26 @@ class TextRecognitionApp:
         status = "enabled" if self.gpu_var.get() else "disabled"
         self._set_status(f"GPU {status}", THEME.accent)
         logger.info("GPU %s", status)
+        self._save_settings()
+
+    def _reset_settings(self) -> None:
+        """Reset settings to defaults and reload UI."""
+        self._settings_manager.reset()
+        defaults = self._settings_manager.load()
+        SETTINGS.default_language = defaults.default_language
+        SETTINGS.default_confidence = defaults.default_confidence
+        SETTINGS.gpu_enabled = defaults.gpu_enabled
+        SETTINGS.frame_skip = defaults.frame_skip
+        SETTINGS.ocr_max_width = defaults.ocr_max_width
+        SETTINGS.paragraph_merge = defaults.paragraph_merge
+        self.language_var.set(SETTINGS.default_language)
+        self.threshold_var.set(SETTINGS.default_confidence)
+        self.gpu_var.set(SETTINGS.gpu_enabled)
+        self.current_language = SETTINGS.default_language
+        self.threshold_label.config(text=f"{SETTINGS.default_confidence:.2f}")
+        self.engine = OCREngine(SETTINGS)
+        self._set_status("Settings reset to defaults", THEME.neutral)
+        logger.info("Settings reset to defaults")
 
     def start_capture(self) -> None:
         if self.capture_active:
@@ -679,6 +705,7 @@ class TextRecognitionApp:
         )
 
     def on_closing(self) -> None:
+        self._save_settings()
         self.capture_active = False
         if self.cap is not None:
             self.cap.release()

@@ -1,6 +1,5 @@
 """Centralized configuration for the text detection app."""
 
-import tkinter as tk
 from dataclasses import dataclass, field
 
 
@@ -37,61 +36,6 @@ class ThemeColors:
     status_ready: str = "#A6E3A1"
     status_busy: str = "#F9E2AF"
     status_error: str = "#F38BA8"
-
-
-class ThemeableButton:
-    """Factory for creating styled buttons with hover effects."""
-
-    def __init__(
-        self,
-        master,
-        text: str,
-        command,
-        bg: str,
-        active_bg: str,
-        font: str = "Arial",
-        font_size: int = 11,
-        width: int = 14,
-        side: str = "top",
-        padx: int = 0,
-        pady: int = 4,
-        fill: str = "x",
-        expand: bool = False,
-    ):
-        self.bg = bg
-        self.active_bg = active_bg
-        self.normal_fg = THEME.button_fg
-        self.command = command
-
-        self.btn = tk.Button(
-            master,
-            text=text,
-            command=command,
-            font=(font, font_size, "bold"),
-            bg=bg,
-            fg=self.normal_fg,
-            activebackground=active_bg,
-            activeforeground=self.normal_fg,
-            relief="flat",
-            borderwidth=0,
-            padx=16,
-            pady=8,
-            cursor="hand2",
-            width=width,
-        )
-        self.btn.pack(side=side, fill=fill, expand=expand, padx=padx, pady=pady)  # type: ignore[arg-type]
-
-        self.btn.bind("<Enter>", self._on_enter)
-        self.btn.bind("<Leave>", self._on_leave)
-
-    def _on_enter(self, _event=None) -> None:
-        self.btn.config(bg=self.active_bg, fg=THEME.background)
-
-    def _on_leave(self, _event=None) -> None:
-        self.btn.config(bg=self.bg, fg=self.normal_fg)
-
-    def config(self, **kwargs) -> None:
-        self.btn.config(**kwargs)
 
 
 @dataclass
