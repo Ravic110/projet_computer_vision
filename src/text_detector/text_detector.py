@@ -50,6 +50,7 @@ class TextRecognitionApp:
         self.current_frame: np.ndarray | None = None
         self.language_var = tk.StringVar(value=SETTINGS.default_language)
         self.threshold_var = tk.DoubleVar(value=SETTINGS.default_confidence)
+        self.frame_skip_var = tk.IntVar(value=SETTINGS.frame_skip)
         self.gpu_var = tk.BooleanVar(value=SETTINGS.gpu_enabled)
         self.preprocess_var = tk.BooleanVar(value=SETTINGS.preprocess_enabled)
         self.history: list[dict[str, str | float]] = []
@@ -124,6 +125,7 @@ class TextRecognitionApp:
         self._create_sidebar_section_label("Settings")
         self._create_language_selector()
         self._create_threshold_slider()
+        self._create_frame_skip_slider()
         self._create_gpu_toggle()
 
     def _create_sidebar_title(self) -> None:
@@ -325,6 +327,46 @@ class TextRecognitionApp:
         )
         self.threshold_scale.pack(fill="x", padx=4)
 
+    def _create_frame_skip_slider(self) -> None:
+        frame = tk.Frame(self.sidebar, bg=THEME.surface)
+        frame.pack(fill="x", pady=6)
+
+        tk.Label(
+            frame,
+            text="OCR Frequency",
+            font=("Arial", 9),
+            bg=THEME.surface,
+            fg=THEME.text_muted,
+        ).pack(side="left", padx=(4, 0))
+
+        self.frame_skip_label = tk.Label(
+            frame,
+            text=f"Every {SETTINGS.frame_skip} frames",
+            font=("Arial", 9, "bold"),
+            bg=THEME.surface,
+            fg=THEME.accent,
+        )
+        self.frame_skip_label.pack(side="right", padx=(4, 4))
+
+        self.frame_skip_scale = tk.Scale(
+            frame,
+            variable=self.frame_skip_var,
+            from_=1,
+            to=60,
+            resolution=1,
+            orient="horizontal",
+            length=160,
+            bg=THEME.surface,
+            fg=THEME.text_fg,
+            highlightthickness=0,
+            activebackground=THEME.accent,
+            troughcolor=THEME.surface_light,
+            sliderrelief="flat",
+            borderwidth=0,
+            command=self._frame_skip_changed,
+        )
+        self.frame_skip_scale.pack(fill="x", padx=4)
+
     def _create_gpu_toggle(self) -> None:
         frame = tk.Frame(self.sidebar, bg=THEME.surface)
         frame.pack(fill="x", pady=6)
@@ -377,11 +419,47 @@ class TextRecognitionApp:
         self.image_label.pack(fill="both", expand=True, padx=8, pady=8)
         self.image_label.config(text="No image loaded")
 
+        self._create_image_context_menu()
+
         self.image_border = tk.Frame(
             self.image_container,
             bg=THEME.border,
             height=2,
         )
+
+    def _create_image_context_menu(self) -> None:
+        self.image_context_menu = tk.Menu(self.root, tearoff=0)
+        self.image_context_menu.add_command(
+            label="Paste image from clipboard",
+            command=self._paste_image_from_clipboard,
+        )
+        self.image_label.bind("<Button-3>", self._show_image_context_menu)
+        self.image_label.bind("<Control-v>", lambda _: self._paste_image_from_clipboard())
+
+    def _show_image_context_menu(self, event: tk.Event) -> None:
+        self.image_context_menu.post(event.x_root, event.y_root)
+
+    def _paste_image_from_clipboard(self) -> None:
+        try:
+            from PIL import ImageGrab
+
+            pil_image = ImageGrab.grabclipboard()
+            if pil_image is None:
+                messagebox.showinfo("Paste Image", "No image found in clipboard.")
+                return
+            if not isinstance(pil_image, Image.Image):
+                messagebox.showerror("Paste Image", "Clipboard content is not an image.")
+                return
+            frame = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
+            self.stop_capture()
+            self.current_frame = frame
+            self._process_current_frame()
+            self._set_status("Image pasted from clipboard", THEME.accent)
+            self.status_led.set_color(THEME.status_ready)
+            logger.info("Image pasted from clipboard")
+        except Exception as e:
+            messagebox.showerror("Paste Image", f"Failed to paste image: {e}")
+            logger.exception("Failed to paste image from clipboard")
 
     # ── Text panel ──────────────────────────────────────────────────
 
@@ -495,6 +573,7 @@ class TextRecognitionApp:
         self.root.bind("<Control-o>", lambda _: self.load_image())
         self.root.bind("<Control-s>", lambda _: self.save_results())
         self.root.bind("<Control-c>", lambda _: self._copy_to_clipboard())
+        self.root.bind("<Control-v>", lambda _: self._paste_image_from_clipboard())
         self.root.bind("<space>", lambda _: self._toggle_capture())
         self.root.bind("<Control-r>", lambda _: self._reset_settings())
         self.root.bind("<Escape>", lambda _: self.clear_results())
@@ -521,6 +600,7 @@ class TextRecognitionApp:
         """Persist current settings to disk."""
         SETTINGS.default_language = self.language_var.get()
         SETTINGS.default_confidence = self.threshold_var.get()
+        SETTINGS.frame_skip = self.frame_skip_var.get()
         SETTINGS.gpu_enabled = self.gpu_var.get()
         SETTINGS.preprocess_enabled = self.preprocess_var.get()
         self._settings_manager.save(SETTINGS)
@@ -535,6 +615,11 @@ class TextRecognitionApp:
 
     def _threshold_changed(self, value: str) -> None:
         self.threshold_label.config(text=f"{float(value):.2f}")
+        self._save_settings()
+
+    def _frame_skip_changed(self, value: str) -> None:
+        skip = int(float(value))
+        self.frame_skip_label.config(text=f"Every {skip} frames")
         self._save_settings()
 
     def _gpu_changed(self) -> None:
