@@ -1,4 +1,4 @@
-.PHONY: install dev test lint format run clean
+.PHONY: install dev test lint format typecheck run clean
 
 install:
 	pip install -e .
@@ -17,6 +17,9 @@ format:
 
 run:
 	python -m text_detector
+
+typecheck:
+	python -m mypy src/
 
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} +

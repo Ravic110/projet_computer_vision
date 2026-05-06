@@ -14,6 +14,7 @@ def setup_logging(config_path: Path | None = None) -> None:
     """
     if config_path is None:
         from text_detector.utils.path_helpers import get_project_root
+
         config_path = get_project_root() / "logging.conf"
 
     if config_path.exists():

@@ -1,5 +1,6 @@
 """Tests for OCR engine module."""
 
+from collections.abc import Generator
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -14,7 +15,7 @@ def settings() -> AppSettings:
 
 
 @pytest.fixture
-def engine(settings: AppSettings) -> OCREngine:
+def engine(settings: AppSettings) -> Generator[OCREngine, None, None]:
     eng = OCREngine(settings)
     yield eng
     eng.shutdown()
@@ -43,6 +44,7 @@ def test_ocr_engine_init_with_settings(settings: AppSettings) -> None:
 
 def test_ocr_engine_detect_text_success(engine: OCREngine) -> None:
     import numpy as np
+
     frame = np.zeros((100, 200, 3), dtype=np.uint8)
     mock_reader = MagicMock()
     mock_reader.readtext.return_value = [
@@ -60,6 +62,7 @@ def test_ocr_engine_detect_text_success(engine: OCREngine) -> None:
 
 def test_ocr_engine_detect_text_failure(engine: OCREngine) -> None:
     import numpy as np
+
     frame = np.zeros((100, 200, 3), dtype=np.uint8)
 
     with patch.object(engine, "_get_reader", side_effect=RuntimeError("model error")):
@@ -72,6 +75,7 @@ def test_ocr_engine_detect_text_failure(engine: OCREngine) -> None:
 
 def test_ocr_engine_model_caching(engine: OCREngine) -> None:
     import numpy as np
+
     frame = np.zeros((100, 200, 3), dtype=np.uint8)
     mock_reader = MagicMock()
 
@@ -85,6 +89,7 @@ def test_ocr_engine_model_caching(engine: OCREngine) -> None:
 
 def test_ocr_engine_cache_clearing(engine: OCREngine) -> None:
     import numpy as np
+
     frame = np.zeros((100, 200, 3), dtype=np.uint8)
     mock_reader = MagicMock()
 

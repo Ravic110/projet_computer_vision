@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 @dataclass(frozen=True)
 class ThemeColors:
     """Dark theme color palette for the GUI."""
+
     background: str = "#1E1E2E"
     surface: str = "#2A2A3C"
     surface_light: str = "#33334A"
@@ -41,10 +42,22 @@ class ThemeColors:
 class ThemeableButton:
     """Factory for creating styled buttons with hover effects."""
 
-    def __init__(self, master, text: str, command, bg: str, active_bg: str,
-                 font: str = "Arial", font_size: int = 11, width: int = 14,
-                 side: str = "top", padx: int = 0, pady: int = 4,
-                 fill: str = "x", expand: bool = False):
+    def __init__(
+        self,
+        master,
+        text: str,
+        command,
+        bg: str,
+        active_bg: str,
+        font: str = "Arial",
+        font_size: int = 11,
+        width: int = 14,
+        side: str = "top",
+        padx: int = 0,
+        pady: int = 4,
+        fill: str = "x",
+        expand: bool = False,
+    ):
         self.bg = bg
         self.active_bg = active_bg
         self.normal_fg = THEME.button_fg
@@ -66,7 +79,7 @@ class ThemeableButton:
             cursor="hand2",
             width=width,
         )
-        self.btn.pack(side=side, fill=fill, expand=expand, padx=padx, pady=pady)
+        self.btn.pack(side=side, fill=fill, expand=expand, padx=padx, pady=pady)  # type: ignore[arg-type]
 
         self.btn.bind("<Enter>", self._on_enter)
         self.btn.bind("<Leave>", self._on_leave)
@@ -84,6 +97,7 @@ class ThemeableButton:
 @dataclass
 class AppSettings:
     """Application settings with validation."""
+
     available_languages: list[str] = field(
         default_factory=lambda: ["en", "fr", "de", "es", "it", "pt"]
     )

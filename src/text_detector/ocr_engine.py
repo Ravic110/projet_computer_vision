@@ -142,9 +142,7 @@ class OCREngine:
                 ocr_frame,
                 paragraph=self._settings.paragraph_merge,
             )
-            detections = [
-                item for item in raw_results if item[2] >= conf_threshold
-            ]
+            detections = [item for item in raw_results if item[2] >= conf_threshold]
             detections = scale_detections(detections, 1.0 / scale)
             return DetectionResult(detections=detections, languages=langs)
         except Exception as e:

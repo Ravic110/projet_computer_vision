@@ -76,7 +76,7 @@ def test_bgr_to_rgb_conversion() -> None:
     frame = np.array([[[0, 0, 255]]], dtype=np.uint8)  # BGR: Red
     result = bgr_to_rgb(frame)
     assert result[0, 0, 0] == 255  # RGB: Red channel
-    assert result[0, 0, 2] == 0    # RGB: Blue channel
+    assert result[0, 0, 2] == 0  # RGB: Blue channel
 
 
 def test_resize_frame_for_ocr_no_resize_needed() -> None:
