@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 
 from text_detector.config import AppSettings
-from text_detector.image_processor import resize_frame_for_ocr, scale_detections
+from text_detector.image_processor import preprocess_for_ocr, resize_frame_for_ocr, scale_detections
 from text_detector.utils.logging_setup import get_logger
 
 logger = get_logger("ocr_engine")
@@ -137,6 +137,8 @@ class OCREngine:
         try:
             reader = self._get_reader(langs)
             ocr_frame, scale = resize_frame_for_ocr(frame, self._settings.ocr_max_width)
+            if self._settings.preprocess_enabled:
+                ocr_frame = preprocess_for_ocr(ocr_frame)
             raw_results = reader.readtext(
                 ocr_frame,
                 paragraph=self._settings.paragraph_merge,

@@ -53,6 +53,7 @@ class AppSettings:
     frame_skip: int = 15
     max_history: int = 100
     gpu_enabled: bool = False
+    preprocess_enabled: bool = True
     ocr_max_width: int = 800
     paragraph_merge: bool = False
 

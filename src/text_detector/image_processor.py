@@ -150,3 +150,31 @@ def bgr_to_rgb(frame: np.ndarray) -> np.ndarray:
         RGB image array.
     """
     return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+
+def preprocess_for_ocr(
+    frame: np.ndarray,
+    strength: int = 10,
+) -> np.ndarray:
+    """Preprocess image for improved OCR accuracy.
+
+    Converts to grayscale, applies non-local means denoising, then
+    converts back to 3-channel BGR for EasyOCR compatibility.
+
+    Args:
+        frame: OpenCV image array (BGR or grayscale).
+        strength: Denoising intensity (higher = stronger). Default 10.
+
+    Returns:
+        3-channel BGR image array with reduced noise.
+    """
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if len(frame.shape) == 3 else frame.copy()
+
+    denoised = cv2.fastNlMeansDenoising(
+        gray,
+        h=strength,
+        templateWindowSize=7,
+        searchWindowSize=21,
+    )
+
+    return cv2.cvtColor(denoised, cv2.COLOR_GRAY2BGR)

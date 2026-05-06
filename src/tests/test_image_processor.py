@@ -7,6 +7,7 @@ from text_detector.image_processor import (
     compute_avg_color,
     draw_boxes_with_colors,
     filter_text,
+    preprocess_for_ocr,
     resize_frame_for_ocr,
     scale_detections,
 )
@@ -104,3 +105,30 @@ def test_scale_detections_applies_factor() -> None:
     result = scale_detections(dets, scale=2.0)
     assert result[0][0][0][0] == 20.0  # 10.0 * 2.0
     assert result[0][1] == "test"
+
+
+def test_preprocess_for_ocr_returns_3channel_bgr() -> None:
+    frame = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
+    result = preprocess_for_ocr(frame)
+    assert result.shape == (100, 100, 3)
+    assert result.dtype == np.uint8
+
+
+def test_preprocess_for_ocr_handles_grayscale() -> None:
+    gray = np.random.randint(0, 255, (100, 100), dtype=np.uint8)
+    result = preprocess_for_ocr(gray)
+    assert result.shape == (100, 100, 3)
+    assert result.dtype == np.uint8
+
+
+def test_preprocess_for_ocr_denoises_image() -> None:
+    frame = np.random.randint(0, 255, (200, 200, 3), dtype=np.uint8)
+    result = preprocess_for_ocr(frame, strength=15)
+    assert result is not None
+    assert result.shape == frame.shape
+
+
+def test_preprocess_for_ocr_default_strength() -> None:
+    frame = np.zeros((50, 50, 3), dtype=np.uint8)
+    result = preprocess_for_ocr(frame)
+    assert result.shape == (50, 50, 3)

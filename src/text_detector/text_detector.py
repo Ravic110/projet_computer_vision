@@ -39,6 +39,7 @@ class TextRecognitionApp:
         SETTINGS.default_language = loaded.default_language
         SETTINGS.default_confidence = loaded.default_confidence
         SETTINGS.gpu_enabled = loaded.gpu_enabled
+        SETTINGS.preprocess_enabled = loaded.preprocess_enabled
         SETTINGS.frame_skip = loaded.frame_skip
         SETTINGS.ocr_max_width = loaded.ocr_max_width
         SETTINGS.paragraph_merge = loaded.paragraph_merge
@@ -50,6 +51,7 @@ class TextRecognitionApp:
         self.language_var = tk.StringVar(value=SETTINGS.default_language)
         self.threshold_var = tk.DoubleVar(value=SETTINGS.default_confidence)
         self.gpu_var = tk.BooleanVar(value=SETTINGS.gpu_enabled)
+        self.preprocess_var = tk.BooleanVar(value=SETTINGS.preprocess_enabled)
         self.history: list[dict[str, str | float]] = []
         self.current_language: str = SETTINGS.default_language
 
@@ -333,6 +335,20 @@ class TextRecognitionApp:
         )
         self.gpu_check.pack(side="left", padx=4)
 
+        self.preprocess_check = tk.Checkbutton(
+            frame,
+            text="Preprocessing",
+            variable=self.preprocess_var,
+            command=self._preprocess_changed,
+            bg=THEME.surface,
+            fg=THEME.text_fg,
+            activebackground=THEME.surface,
+            selectcolor=THEME.surface_light,
+            highlightthickness=0,
+            font=("Arial", 9),
+        )
+        self.preprocess_check.pack(side="left", padx=4)
+
     # ── Image area ──────────────────────────────────────────────────
 
     def _create_image_area(self) -> None:
@@ -456,6 +472,7 @@ class TextRecognitionApp:
         SETTINGS.default_language = self.language_var.get()
         SETTINGS.default_confidence = self.threshold_var.get()
         SETTINGS.gpu_enabled = self.gpu_var.get()
+        SETTINGS.preprocess_enabled = self.preprocess_var.get()
         self._settings_manager.save(SETTINGS)
 
     def _language_changed(self, value: str) -> None:
@@ -478,6 +495,13 @@ class TextRecognitionApp:
         logger.info("GPU %s", status)
         self._save_settings()
 
+    def _preprocess_changed(self) -> None:
+        self.engine._settings.preprocess_enabled = self.preprocess_var.get()
+        status = "enabled" if self.preprocess_var.get() else "disabled"
+        self._set_status(f"Preprocessing {status}", THEME.accent)
+        logger.info("Preprocessing %s", status)
+        self._save_settings()
+
     def _reset_settings(self) -> None:
         """Reset settings to defaults and reload UI."""
         self._settings_manager.reset()
@@ -485,12 +509,14 @@ class TextRecognitionApp:
         SETTINGS.default_language = defaults.default_language
         SETTINGS.default_confidence = defaults.default_confidence
         SETTINGS.gpu_enabled = defaults.gpu_enabled
+        SETTINGS.preprocess_enabled = defaults.preprocess_enabled
         SETTINGS.frame_skip = defaults.frame_skip
         SETTINGS.ocr_max_width = defaults.ocr_max_width
         SETTINGS.paragraph_merge = defaults.paragraph_merge
         self.language_var.set(SETTINGS.default_language)
         self.threshold_var.set(SETTINGS.default_confidence)
         self.gpu_var.set(SETTINGS.gpu_enabled)
+        self.preprocess_var.set(SETTINGS.preprocess_enabled)
         self.current_language = SETTINGS.default_language
         self.threshold_label.config(text=f"{SETTINGS.default_confidence:.2f}")
         self.engine = OCREngine(SETTINGS)
