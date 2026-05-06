@@ -5,8 +5,9 @@ import csv
 import json
 import threading
 import tkinter as tk
+from datetime import datetime
 from pathlib import Path
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 
 import cv2
 import numpy as np
@@ -55,6 +56,9 @@ class TextRecognitionApp:
         self.preprocess_var = tk.BooleanVar(value=SETTINGS.preprocess_enabled)
         self.history: list[dict[str, str | float]] = []
         self.current_language: str = SETTINGS.default_language
+        self.roi_mode = False
+        self.roi: tuple[int, int, int, int] | None = None
+        self._roi_start: tuple[int, int] | None = None
 
         self.engine = OCREngine(SETTINGS)
         self.ocr_result: DetectionResult | None = None
@@ -219,6 +223,34 @@ class TextRecognitionApp:
             expand=True,
             pady=4,
             tooltip="Clear all results (Esc)",
+        )
+
+        self.roi_btn = ThemeableButton(
+            self.sidebar,
+            "▣ Select ROI",
+            self._toggle_roi_mode,
+            bg=THEME.accent,
+            active_bg=THEME.accent_active,
+            font="Arial",
+            font_size=11,
+            fill="x",
+            expand=True,
+            pady=4,
+            tooltip="Select region of interest for OCR",
+        )
+
+        self.clear_roi_btn = ThemeableButton(
+            self.sidebar,
+            "✕ Clear ROI",
+            self._clear_roi,
+            bg=THEME.neutral,
+            active_bg=THEME.neutral_active,
+            font="Arial",
+            font_size=10,
+            fill="x",
+            expand=True,
+            pady=4,
+            tooltip="Clear ROI selection",
         )
 
         tk.Frame(self.sidebar, bg=THEME.border, height=1).pack(fill="x", pady=(8, 4))
@@ -500,11 +532,20 @@ class TextRecognitionApp:
             tooltip="Copy detected text to clipboard (Ctrl+C)",
         )
 
-        self.text_wrapper = tk.Frame(self.text_panel, bg=THEME.text_output_bg)
-        self.text_wrapper.pack(fill="both", expand=True, padx=8, pady=8)
+        self.notebook = ttk.Notebook(
+            self.text_panel,
+        )
+        self.notebook.pack(fill="both", expand=True, padx=8, pady=8)
+
+        self._create_current_tab()
+        self._create_history_tab()
+
+    def _create_current_tab(self) -> None:
+        self.current_frame_tab = tk.Frame(self.notebook, bg=THEME.text_output_bg)
+        self.notebook.add(self.current_frame_tab, text="Current")
 
         self.text_scrollbar = tk.Scrollbar(
-            self.text_wrapper,
+            self.current_frame_tab,
             orient="vertical",
             bg=THEME.scrollbar_bg,
             troughcolor=THEME.scrollbar_bg,
@@ -515,7 +556,7 @@ class TextRecognitionApp:
         self.text_scrollbar.pack(side="right", fill="y")
 
         self.text_output = tk.Text(
-            self.text_wrapper,
+            self.current_frame_tab,
             wrap="word",
             bg=THEME.text_output_bg,
             fg=THEME.text_fg,
@@ -533,6 +574,66 @@ class TextRecognitionApp:
         self.text_output.pack(side="left", fill="both", expand=True)
         self.text_scrollbar.config(command=self.text_output.yview)
         self.text_output.config(state="disabled")
+
+    def _create_history_tab(self) -> None:
+        self.history_tab = tk.Frame(self.notebook, bg=THEME.text_output_bg)
+        self.notebook.add(self.history_tab, text="History")
+
+        self.history_search = tk.Entry(
+            self.history_tab,
+            bg=THEME.surface_light,
+            fg=THEME.text_fg,
+            insertbackground=THEME.accent,
+            relief="flat",
+            font=("Arial", 9),
+        )
+        self.history_search.pack(fill="x", padx=4, pady=(4, 2))
+        self.history_search.bind("<KeyRelease>", self._filter_history)
+        self.history_search.insert(0, "Search history...")
+        self.history_search.bind("<FocusIn>", self._on_history_search_focus)
+
+        self.history_listbox_frame = tk.Frame(self.history_tab, bg=THEME.text_output_bg)
+        self.history_listbox_frame.pack(fill="both", expand=True, padx=4, pady=4)
+
+        self.history_scrollbar = tk.Scrollbar(
+            self.history_listbox_frame,
+            orient="vertical",
+            bg=THEME.scrollbar_bg,
+            troughcolor=THEME.scrollbar_bg,
+            activebackground=THEME.scrollbar_fg,
+            highlightthickness=0,
+            borderwidth=0,
+        )
+        self.history_scrollbar.pack(side="right", fill="y")
+
+        self.history_listbox = tk.Listbox(
+            self.history_listbox_frame,
+            bg=THEME.text_output_bg,
+            fg=THEME.text_fg,
+            font=("Consolas", 9),
+            yscrollcommand=self.history_scrollbar.set,
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=0,
+            selectbackground=THEME.accent,
+            selectforeground=THEME.button_fg,
+        )
+        self.history_listbox.pack(side="left", fill="both", expand=True)
+        self.history_scrollbar.config(command=self.history_listbox.yview)
+        self.history_listbox.bind("<Double-Button-1>", self._copy_history_item)
+
+        self.clear_history_btn = ThemeableButton(
+            self.history_tab,
+            "Clear History",
+            self._clear_history,
+            bg=THEME.neutral,
+            active_bg=THEME.neutral_active,
+            font="Arial",
+            font_size=9,
+            fill="x",
+            padx=4,
+            pady=2,
+        )
 
     # ── Status bar ──────────────────────────────────────────────────
 
@@ -707,7 +808,8 @@ class TextRecognitionApp:
         logger.info("Loaded image: %s", path)
 
     def _process_current_frame(self) -> None:
-        if self.current_frame is None:
+        frame = self._get_cropped_frame()
+        if frame is None:
             return
 
         if self.engine.is_busy:
@@ -719,7 +821,7 @@ class TextRecognitionApp:
             self.root.after(0, self._apply_ocr_result)
 
         queued = self.engine.detect_text_async(
-            self.current_frame,
+            frame,
             languages=[self.current_language],
             threshold=self.threshold_var.get(),
             callback=_on_result,
@@ -780,10 +882,46 @@ class TextRecognitionApp:
                     "text": text,
                     "confidence": round(confidence, 2),
                     "language": self.current_language,
+                    "timestamp": datetime.now().strftime("%H:%M:%S"),
                 }
             )
         if len(self.history) > SETTINGS.max_history:
             self.history = self.history[-SETTINGS.max_history :]
+        self._refresh_history_display()
+
+    def _refresh_history_display(self) -> None:
+        self.history_listbox.delete(0, tk.END)
+        for entry in self.history:
+            display = f"[{entry['timestamp']}] {entry['text']} ({entry['confidence']})"
+            self.history_listbox.insert(tk.END, display)
+
+    def _filter_history(self, _event=None) -> None:
+        query = self.history_search.get().lower()
+        self.history_listbox.delete(0, tk.END)
+        for entry in self.history:
+            text = str(entry["text"])
+            if query in text.lower():
+                display = f"[{entry['timestamp']}] {text} ({entry['confidence']})"
+                self.history_listbox.insert(tk.END, display)
+
+    def _on_history_search_focus(self, _event=None) -> None:
+        if self.history_search.get() == "Search history...":
+            self.history_search.delete(0, tk.END)
+
+    def _copy_history_item(self, _event=None) -> None:
+        sel = self.history_listbox.curselection()
+        if not sel:
+            return
+        idx = sel[0]
+        text = self.history[idx]["text"]
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+        self._set_status("Copied to clipboard", THEME.status_ready)
+
+    def _clear_history(self) -> None:
+        self.history.clear()
+        self._refresh_history_display()
+        self._set_status("History cleared", THEME.neutral)
 
     def save_results(self) -> None:
         if not self.detected_text:
@@ -873,6 +1011,59 @@ class TextRecognitionApp:
         self.engine.shutdown()
         self.root.destroy()
         logger.info("Application closed")
+
+    def _toggle_roi_mode(self) -> None:
+        self.roi_mode = not self.roi_mode
+        if self.roi_mode:
+            self.roi_btn.config(text="✓ ROI Active")
+            self.roi_btn.config(bg=THEME.success)
+            self._set_status("ROI mode: click and drag on image", THEME.accent)
+            self.image_label.bind("<Button-1>", self._on_roi_click)
+            self.image_label.bind("<B1-Motion>", self._on_roi_drag)
+            self.image_label.bind("<ButtonRelease-1>", self._on_roi_release)
+        else:
+            self.roi_btn.config(text="▣ Select ROI")
+            self.roi_btn.config(bg=THEME.accent)
+            self.image_label.unbind("<Button-1>")
+            self.image_label.unbind("<B1-Motion>")
+            self.image_label.unbind("<ButtonRelease-1>")
+
+    def _on_roi_click(self, event: tk.Event) -> None:
+        self._roi_start = (event.x, event.y)
+
+    def _on_roi_drag(self, event: tk.Event) -> None:
+        if self._roi_start and self.current_frame is not None:
+            x1, y1 = self._roi_start
+            self.image_label.config(
+                relief="solid",
+                borderwidth=2,
+            )
+
+    def _on_roi_release(self, event: tk.Event) -> None:
+        if self._roi_start and self.current_frame is not None:
+            x1, y1 = self._roi_start
+            x2, y2 = event.x, event.y
+            if abs(x2 - x1) > 10 and abs(y2 - y1) > 10:
+                self.roi = (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
+                self._set_status(
+                    f"ROI set: ({self.roi[0]}, {self.roi[1]}) to ({self.roi[2]}, {self.roi[3]})",
+                    THEME.status_ready,
+                )
+            self.image_label.config(relief="flat", borderwidth=0)
+            self._roi_start = None
+            self._toggle_roi_mode()
+
+    def _clear_roi(self) -> None:
+        self.roi = None
+        self._set_status("ROI cleared", THEME.neutral)
+
+    def _get_cropped_frame(self) -> np.ndarray | None:
+        if self.current_frame is None:
+            return None
+        if self.roi:
+            x1, y1, x2, y2 = self.roi
+            return self.current_frame[y1:y2, x1:x2]
+        return self.current_frame
 
     # ── Helpers ─────────────────────────────────────────────────────
 

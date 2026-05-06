@@ -130,3 +130,78 @@ class TestPasteImageFromClipboard:
         with patch.object(app.root, 'bind', mock_bind):
             app._bind_keyboard_shortcuts()
             assert "<Control-v>" in bindings
+
+
+class TestHistoryPanel:
+    def test_add_to_history_includes_timestamp(self, app):
+        app.detected_text = [((0, 0, 100, 50), "Test", 0.9)]
+        app._add_to_history()
+        assert len(app.history) == 1
+        assert "timestamp" in app.history[0]
+        assert "text" in app.history[0]
+        assert "confidence" in app.history[0]
+
+    def test_refresh_history_display_populates_listbox(self, app):
+        app.history = [
+            {"text": "Hello", "confidence": 0.95, "timestamp": "10:00:00"},
+            {"text": "World", "confidence": 0.88, "timestamp": "10:00:01"},
+        ]
+        app._refresh_history_display()
+        assert app.history_listbox.size() == 2
+
+    def test_filter_history(self, app):
+        app.history = [
+            {"text": "Hello World", "confidence": 0.95, "timestamp": "10:00:00"},
+            {"text": "Goodbye", "confidence": 0.88, "timestamp": "10:00:01"},
+        ]
+        app.history_search.delete(0, tk.END)
+        app.history_search.insert(0, "Hello")
+        app._filter_history()
+        assert app.history_listbox.size() == 1
+
+    def test_clear_history(self, app):
+        app.history = [{"text": "Test", "confidence": 0.9, "timestamp": "10:00:00"}]
+        app._clear_history()
+        assert len(app.history) == 0
+        assert app.history_listbox.size() == 0
+
+    def test_copy_history_item(self, app):
+        app.history = [{"text": "Secret", "confidence": 0.9, "timestamp": "10:00:00"}]
+        app._refresh_history_display()
+        app.history_listbox.selection_set(0)
+        app._copy_history_item()
+        clipboard_content = app.root.clipboard_get()
+        assert clipboard_content == "Secret"
+
+
+class TestROISelection:
+    def test_toggle_roi_mode_activates(self, app):
+        assert not app.roi_mode
+        app._toggle_roi_mode()
+        assert app.roi_mode
+        app._toggle_roi_mode()
+        assert not app.roi_mode
+
+    def test_clear_roi(self, app):
+        app.roi = (10, 10, 100, 100)
+        app._clear_roi()
+        assert app.roi is None
+
+    def test_get_cropped_frame_without_roi(self, app):
+        import numpy as np
+        app.current_frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        app.roi = None
+        result = app._get_cropped_frame()
+        assert result.shape == (100, 100, 3)
+
+    def test_get_cropped_frame_with_roi(self, app):
+        import numpy as np
+        app.current_frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        app.roi = (10, 20, 50, 60)
+        result = app._get_cropped_frame()
+        assert result.shape == (40, 40, 3)
+
+    def test_get_cropped_frame_no_current_frame(self, app):
+        app.current_frame = None
+        result = app._get_cropped_frame()
+        assert result is None
