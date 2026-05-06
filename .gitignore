@@ -21,3 +21,4 @@ detected_text_results.txt
 *.egg
 .mypy_cache/
 .ruff_cache/
+docs/
