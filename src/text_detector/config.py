@@ -1,30 +1,84 @@
 """Centralized configuration for the text detection app."""
 
+import tkinter as tk
 from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
 class ThemeColors:
-    """Color theme constants for the GUI."""
-    background: str = "#F0F0F0"
-    white: str = "#FFFFFF"
-    frame_bg: str = "#FFFFFF"
-    result_frame_bg: str = "#DDEEFF"
-    text_output_bg: str = "#F7F7F7"
-    title_bg: str = "#63BFF3"
-    title_fg: str = "#FFFFFF"
-    primary: str = "#4A90E2"
-    primary_active: str = "#3A70B2"
-    success: str = "#5AE3B1"
-    success_active: str = "#4AA57C"
-    danger: str = "#CA3074"
-    danger_active: str = "#A02458"
-    warning: str = "#FFA500"
-    warning_active: str = "#CC8400"
-    neutral: str = "#888888"
-    neutral_active: str = "#666666"
-    about: str = "#6D6DFF"
-    about_active: str = "#5757D0"
+    """Dark theme color palette for the GUI."""
+    background: str = "#1E1E2E"
+    surface: str = "#2A2A3C"
+    surface_light: str = "#33334A"
+    frame_bg: str = "#2A2A3C"
+    result_frame_bg: str = "#181825"
+    text_output_bg: str = "#1A1A2E"
+    title_bg: str = "#1E1E2E"
+    title_fg: str = "#CDD6F4"
+    accent: str = "#89B4FA"
+    accent_active: str = "#74C7EC"
+    success: str = "#A6E3A1"
+    success_active: str = "#94E2D5"
+    danger: str = "#F38BA8"
+    danger_active: str = "#F2CDCD"
+    warning: str = "#F9E2AF"
+    warning_active: str = "#FAE3B0"
+    neutral: str = "#6C7086"
+    neutral_active: str = "#585B70"
+    about: str = "#CBA6F7"
+    about_active: str = "#B4BEFE"
+    button_fg: str = "#1E1E2E"
+    text_fg: str = "#CDD6F4"
+    text_muted: str = "#A6ADC8"
+    border: str = "#45475A"
+    scrollbar_bg: str = "#313244"
+    scrollbar_fg: str = "#6C7086"
+    status_ready: str = "#A6E3A1"
+    status_busy: str = "#F9E2AF"
+    status_error: str = "#F38BA8"
+
+
+class ThemeableButton:
+    """Factory for creating styled buttons with hover effects."""
+
+    def __init__(self, master, text: str, command, bg: str, active_bg: str,
+                 font: str = "Arial", font_size: int = 11, width: int = 14,
+                 side: str = "top", padx: int = 0, pady: int = 4,
+                 fill: str = "x", expand: bool = False):
+        self.bg = bg
+        self.active_bg = active_bg
+        self.normal_fg = THEME.button_fg
+        self.command = command
+
+        self.btn = tk.Button(
+            master,
+            text=text,
+            command=command,
+            font=(font, font_size, "bold"),
+            bg=bg,
+            fg=self.normal_fg,
+            activebackground=active_bg,
+            activeforeground=self.normal_fg,
+            relief="flat",
+            borderwidth=0,
+            padx=16,
+            pady=8,
+            cursor="hand2",
+            width=width,
+        )
+        self.btn.pack(side=side, fill=fill, expand=expand, padx=padx, pady=pady)
+
+        self.btn.bind("<Enter>", self._on_enter)
+        self.btn.bind("<Leave>", self._on_leave)
+
+    def _on_enter(self, _event=None) -> None:
+        self.btn.config(bg=self.active_bg, fg=THEME.background)
+
+    def _on_leave(self, _event=None) -> None:
+        self.btn.config(bg=self.bg, fg=self.normal_fg)
+
+    def config(self, **kwargs) -> None:
+        self.btn.config(**kwargs)
 
 
 @dataclass

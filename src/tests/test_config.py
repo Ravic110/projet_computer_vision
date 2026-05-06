@@ -7,10 +7,10 @@ from text_detector.config import AppSettings, ThemeColors
 
 def test_theme_colors_defaults() -> None:
     theme = ThemeColors()
-    assert theme.background == "#F0F0F0"
-    assert theme.primary == "#4A90E2"
-    assert theme.success == "#5AE3B1"
-    assert theme.danger == "#CA3074"
+    assert theme.background == "#1E1E2E"
+    assert theme.accent == "#89B4FA"
+    assert theme.success == "#A6E3A1"
+    assert theme.danger == "#F38BA8"
 
 
 def test_app_settings_defaults() -> None:

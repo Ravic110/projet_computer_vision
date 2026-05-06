@@ -12,7 +12,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageTk
 
-from text_detector.config import SETTINGS, THEME
+from text_detector.config import SETTINGS, THEME, ThemeableButton
 from text_detector.image_processor import bgr_to_rgb, draw_boxes_with_colors
 from text_detector.ocr_engine import DetectionResult, OCREngine
 from text_detector.utils.logging_setup import get_logger
@@ -21,14 +21,39 @@ from text_detector.utils.path_helpers import get_assets_dir
 logger = get_logger("gui")
 
 
+class StatusLED:
+    """A small circular status indicator widget."""
+
+    def __init__(self, master, color: str = THEME.status_ready, size: int = 12):
+        self.color = color
+        self.size = size
+        self.canvas = tk.Canvas(
+            master, width=size, height=size,
+            bg=THEME.background, highlightthickness=0,
+        )
+        self._draw()
+
+    def _draw(self) -> None:
+        r = self.size // 2
+        self.canvas.create_oval(1, 1, r * 2 - 1, r * 2 - 1,
+                                fill=self.color, outline="")
+
+    def set_color(self, color: str) -> None:
+        self.color = color
+        self._draw()
+
+    def pack(self, **kwargs) -> None:
+        self.canvas.pack(**kwargs)
+
+
 class TextRecognitionApp:
     """A GUI application for real-time text recognition using EasyOCR."""
 
     def __init__(self, main: tk.Tk) -> None:
         self.cap: cv2.VideoCapture | None = None
         self.root = main
-        self.root.title("Text Recognition App")
-        self.root.geometry("1000x700")
+        self.root.title("Text Detection App")
+        self.root.geometry("1200x720")
         self.root.resizable(True, True)
         self.root.configure(bg=THEME.background)
 
@@ -52,6 +77,8 @@ class TextRecognitionApp:
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.update_frame()
 
+    # ── Initialisation ──────────────────────────────────────────────
+
     def _configure_icon(self) -> None:
         icon_path = get_assets_dir() / "icon.ico"
         if icon_path.exists():
@@ -59,153 +86,282 @@ class TextRecognitionApp:
                 self.root.iconbitmap(str(icon_path))
 
     def _create_widgets(self) -> None:
-        self.main_frame = tk.Frame(self.root, bg=THEME.frame_bg, bd=2, relief="groove")
-        self.main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        self._create_main_layout()
+        self._create_sidebar()
+        self._create_image_area()
+        self._create_text_panel()
+        self._create_status_bar()
 
-        self.title_label = tk.Label(
-            self.main_frame,
-            text="Text Recognition",
-            font=("Arial", 24, "bold"),
-            bg=THEME.title_bg,
-            fg=THEME.title_fg,
-            pady=10,
+    def _create_main_layout(self) -> None:
+        self.main_paned = tk.PanedWindow(
+            self.root, orient="horizontal",
+            bg=THEME.background, sashwidth=4, sashrelief="flat",
         )
-        self.title_label.pack(fill="x")
+        self.main_paned.pack(fill="both", expand=True, padx=8, pady=8)
 
-        self._create_control_frame()
-        self._create_settings_frame()
-        self._create_result_frame()
-
-        self.status_bar = tk.Label(
-            self.root,
-            text="Ready",
-            font=("Arial", 10, "italic"),
-            bg=THEME.title_bg,
-            fg=THEME.title_fg,
-            relief="ridge",
-            anchor="w",
+        self.sidebar = tk.Frame(
+            self.main_paned, bg=THEME.surface,
+            relief="flat", padx=12, pady=12,
         )
-        self.status_bar.pack(side="bottom", fill="x")
 
-    def _create_control_frame(self) -> None:
-        self.control_frame = tk.Frame(self.main_frame, bg=THEME.background)
-        self.control_frame.pack(fill="x", pady=10)
-
-        buttons = [
-            ("Start Webcam", self.start_capture, THEME.success, THEME.success_active),
-            ("Stop Capture", self.stop_capture, THEME.danger, THEME.danger_active),
-            ("Load Image", self.load_image, THEME.primary, THEME.primary_active),
-            ("Save Results", self.save_results, THEME.warning, THEME.warning_active),
-            ("Clear", self.clear_results, THEME.neutral, THEME.neutral_active),
-        ]
-
-        for text, cmd, bg, active in buttons:
-            btn = tk.Button(
-                self.control_frame,
-                text=text,
-                command=cmd,
-                font=("Arial", 12, "bold"),
-                bg=bg,
-                fg=THEME.white,
-                activebackground=active,
-                relief="ridge",
-                padx=10,
-                pady=5,
-            )
-            btn.pack(side="left", padx=5)
-
-        about_btn = tk.Button(
-            self.control_frame,
-            text="About",
-            command=self.show_about,
-            font=("Arial", 12, "bold"),
-            bg=THEME.about,
-            fg=THEME.white,
-            activebackground=THEME.about_active,
-            relief="ridge",
-            padx=10,
-            pady=5,
+        self.center_paned = tk.PanedWindow(
+            self.main_paned, orient="horizontal",
+            bg=THEME.background, sashwidth=4, sashrelief="flat",
         )
-        about_btn.pack(side="right", padx=5)
+        self.main_paned.add(self.sidebar, width=240, minsize=200)
+        self.main_paned.add(self.center_paned)
 
-    def _create_settings_frame(self) -> None:
-        self.settings_frame = tk.Frame(self.main_frame, bg=THEME.background)
-        self.settings_frame.pack(fill="x", pady=5)
+    # ── Sidebar ─────────────────────────────────────────────────────
+
+    def _create_sidebar(self) -> None:
+        self._create_sidebar_title()
+
+        tk.Frame(self.sidebar, bg=THEME.border, height=1).pack(
+            fill="x", pady=(8, 12)
+        )
+
+        self._create_sidebar_section_label("Actions")
+        self._create_action_buttons()
+
+        tk.Frame(self.sidebar, bg=THEME.border, height=1).pack(
+            fill="x", pady=(12, 8)
+        )
+
+        self._create_sidebar_section_label("Settings")
+        self._create_language_selector()
+        self._create_threshold_slider()
+        self._create_gpu_toggle()
+
+    def _create_sidebar_title(self) -> None:
+        tk.Label(
+            self.sidebar, text="Text Detection",
+            font=("Arial", 18, "bold"),
+            bg=THEME.surface, fg=THEME.accent,
+        ).pack(anchor="w", padx=4, pady=(0, 4))
 
         tk.Label(
-            self.settings_frame, text="OCR Language:", bg=THEME.background
-        ).pack(side="left", padx=(5, 0))
+            self.sidebar, text="v2.0",
+            font=("Arial", 9),
+            bg=THEME.surface, fg=THEME.text_muted,
+        ).pack(anchor="w", padx=6)
+
+    def _create_sidebar_section_label(self, text: str) -> None:
+        tk.Label(
+            self.sidebar, text=text.upper(),
+            font=("Arial", 9, "bold"),
+            bg=THEME.surface, fg=THEME.text_muted,
+        ).pack(anchor="w", padx=4, pady=(0, 6))
+
+    def _create_action_buttons(self) -> None:
+        self.start_btn = ThemeableButton(
+            self.sidebar, "▶ Start Webcam", self.start_capture,
+            bg=THEME.success, active_bg=THEME.success_active,
+            font="Arial", font_size=11, fill="x", expand=True, pady=4,
+        )
+        self.stop_btn = ThemeableButton(
+            self.sidebar, "■ Stop Capture", self.stop_capture,
+            bg=THEME.danger, active_bg=THEME.danger_active,
+            font="Arial", font_size=11, fill="x", expand=True, pady=4,
+        )
+        self.load_btn = ThemeableButton(
+            self.sidebar, "📁 Load Image", self.load_image,
+            bg=THEME.accent, active_bg=THEME.accent_active,
+            font="Arial", font_size=11, fill="x", expand=True, pady=4,
+        )
+        self.save_btn = ThemeableButton(
+            self.sidebar, "💾 Save Results", self.save_results,
+            bg=THEME.warning, active_bg=THEME.warning_active,
+            font="Arial", font_size=11, fill="x", expand=True, pady=4,
+        )
+        self.clear_btn = ThemeableButton(
+            self.sidebar, "✕ Clear", self.clear_results,
+            bg=THEME.neutral, active_bg=THEME.neutral_active,
+            font="Arial", font_size=11, fill="x", expand=True, pady=4,
+        )
+
+        tk.Frame(self.sidebar, bg=THEME.border, height=1).pack(
+            fill="x", pady=(8, 4)
+        )
+
+        self.about_btn = ThemeableButton(
+            self.sidebar, "ℹ About", self.show_about,
+            bg=THEME.surface_light, active_bg=THEME.about,
+            font="Arial", font_size=10, fill="x", expand=True, pady=4,
+        )
+
+    def _create_language_selector(self) -> None:
+        frame = tk.Frame(self.sidebar, bg=THEME.surface)
+        frame.pack(fill="x", pady=2)
+
+        tk.Label(
+            frame, text="Language", font=("Arial", 9),
+            bg=THEME.surface, fg=THEME.text_muted,
+        ).pack(side="left", padx=(4, 0))
+
         self.language_menu = tk.OptionMenu(
-            self.settings_frame,
-            self.language_var,
-            *SETTINGS.available_languages,
+            frame, self.language_var, *SETTINGS.available_languages,
             command=self._language_changed,
         )
-        self.language_menu.pack(side="left", padx=5)
+        self.language_menu.config(
+            font=("Arial", 10),
+            bg=THEME.surface_light, fg=THEME.text_fg,
+            activebackground=THEME.accent, activeforeground=THEME.button_fg,
+            relief="flat", borderwidth=0, highlightthickness=0,
+        )
+        self.language_menu["menu"].config(
+            bg=THEME.surface_light, fg=THEME.text_fg,
+            activebackground=THEME.accent, activeforeground=THEME.button_fg,
+        )
+        self.language_menu.pack(side="right", fill="x", expand=True, padx=4)
+
+    def _create_threshold_slider(self) -> None:
+        frame = tk.Frame(self.sidebar, bg=THEME.surface)
+        frame.pack(fill="x", pady=6)
 
         tk.Label(
-            self.settings_frame, text="Confidence threshold:", bg=THEME.background
-        ).pack(side="left", padx=(10, 0))
-        self.threshold_scale = tk.Scale(
-            self.settings_frame,
-            variable=self.threshold_var,
-            from_=SETTINGS.min_confidence,
-            to=SETTINGS.max_confidence,
-            resolution=SETTINGS.confidence_resolution,
-            orient="horizontal",
-            length=220,
-            bg=THEME.background,
+            frame, text="Confidence", font=("Arial", 9),
+            bg=THEME.surface, fg=THEME.text_muted,
+        ).pack(side="left", padx=(4, 0))
+
+        self.threshold_label = tk.Label(
+            frame, text=f"{SETTINGS.default_confidence:.2f}",
+            font=("Arial", 9, "bold"), bg=THEME.surface, fg=THEME.accent,
         )
-        self.threshold_scale.pack(side="left", padx=5)
+        self.threshold_label.pack(side="right", padx=(4, 4))
+
+        self.threshold_scale = tk.Scale(
+            frame, variable=self.threshold_var,
+            from_=SETTINGS.min_confidence, to=SETTINGS.max_confidence,
+            resolution=SETTINGS.confidence_resolution,
+            orient="horizontal", length=160,
+            bg=THEME.surface, fg=THEME.text_fg,
+            highlightthickness=0, activebackground=THEME.accent,
+            troughcolor=THEME.surface_light,
+            sliderrelief="flat", borderwidth=0,
+            command=self._threshold_changed,
+        )
+        self.threshold_scale.pack(fill="x", padx=4)
+
+    def _create_gpu_toggle(self) -> None:
+        frame = tk.Frame(self.sidebar, bg=THEME.surface)
+        frame.pack(fill="x", pady=6)
 
         self.gpu_check = tk.Checkbutton(
-            self.settings_frame,
-            text="Use GPU",
-            variable=self.gpu_var,
-            command=self._gpu_changed,
-            bg=THEME.background,
+            frame, text="GPU Acceleration",
+            variable=self.gpu_var, command=self._gpu_changed,
+            bg=THEME.surface, fg=THEME.text_fg,
+            activebackground=THEME.surface, selectcolor=THEME.surface_light,
+            highlightthickness=0, font=("Arial", 9),
         )
-        self.gpu_check.pack(side="left", padx=10)
+        self.gpu_check.pack(side="left", padx=4)
 
-    def _create_result_frame(self) -> None:
-        self.result_frame = tk.Frame(
-            self.main_frame, bg=THEME.result_frame_bg, bd=2, relief="sunken"
+    # ── Image area ──────────────────────────────────────────────────
+
+    def _create_image_area(self) -> None:
+        self.image_container = tk.Frame(
+            self.center_paned, bg=THEME.result_frame_bg,
+            bd=2, relief="flat",
         )
-        self.result_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        self.center_paned.add(self.image_container)
 
-        self.image_label = tk.Label(self.result_frame, bg=THEME.result_frame_bg)
-        self.image_label.pack(side="left", fill="both", expand=True)
-
-        self.text_frame = tk.Frame(self.result_frame, bg=THEME.white, bd=1, relief="sunken")
-        self.text_frame.pack(side="right", fill="y", padx=5, pady=5)
-
-        self.text_title = tk.Label(
-            self.text_frame,
-            text="Detected Text",
-            font=("Arial", 14, "bold"),
-            bg=THEME.primary,
-            fg=THEME.white,
-            padx=10,
-            pady=10,
+        self.image_label = tk.Label(
+            self.image_container, bg=THEME.result_frame_bg,
+            fg=THEME.text_muted, font=("Arial", 14),
         )
-        self.text_title.pack(fill="x")
+        self.image_label.pack(fill="both", expand=True, padx=8, pady=8)
+        self.image_label.config(text="No image loaded")
 
-        self.text_output = tk.Text(self.text_frame, wrap="word", width=35, bg=THEME.text_output_bg)
-        self.text_output.pack(fill="both", expand=True, padx=5, pady=(0, 5))
+        self.image_border = tk.Frame(
+            self.image_container, bg=THEME.border, height=2,
+        )
+
+    # ── Text panel ──────────────────────────────────────────────────
+
+    def _create_text_panel(self) -> None:
+        self.text_panel = tk.Frame(
+            self.center_paned, bg=THEME.surface, width=280,
+        )
+        self.center_paned.add(self.text_panel)
+
+        self.text_header = tk.Frame(self.text_panel, bg=THEME.accent)
+        self.text_header.pack(fill="x")
+
+        tk.Label(
+            self.text_header, text=" Detected Text",
+            font=("Arial", 11, "bold"),
+            bg=THEME.accent, fg=THEME.button_fg,
+            padx=10, pady=8,
+        ).pack(anchor="w")
+
+        self.text_wrapper = tk.Frame(self.text_panel, bg=THEME.text_output_bg)
+        self.text_wrapper.pack(fill="both", expand=True, padx=8, pady=8)
+
+        self.text_scrollbar = tk.Scrollbar(
+            self.text_wrapper, orient="vertical",
+            bg=THEME.scrollbar_bg, troughcolor=THEME.scrollbar_bg,
+            activebackground=THEME.scrollbar_fg,
+            highlightthickness=0, borderwidth=0,
+        )
+        self.text_scrollbar.pack(side="right", fill="y")
+
+        self.text_output = tk.Text(
+            self.text_wrapper, wrap="word",
+            bg=THEME.text_output_bg, fg=THEME.text_fg,
+            font=("Consolas", 10),
+            yscrollcommand=self.text_scrollbar.set,
+            insertbackground=THEME.accent,
+            selectbackground=THEME.accent,
+            selectforeground=THEME.button_fg,
+            relief="flat", borderwidth=0, highlightthickness=0,
+            padx=8, pady=8,
+        )
+        self.text_output.pack(side="left", fill="both", expand=True)
+        self.text_scrollbar.config(command=self.text_output.yview)
         self.text_output.config(state="disabled")
+
+    # ── Status bar ──────────────────────────────────────────────────
+
+    def _create_status_bar(self) -> None:
+        self.status_frame = tk.Frame(
+            self.root, bg=THEME.surface, bd=1, relief="flat",
+        )
+        self.status_frame.pack(side="bottom", fill="x")
+
+        self.status_led = StatusLED(self.status_frame, size=10)
+        self.status_led.canvas.pack(side="left", padx=(10, 6), pady=4)
+
+        self.status_label = tk.Label(
+            self.status_frame, text="Ready",
+            font=("Arial", 10),
+            bg=THEME.surface, fg=THEME.text_muted,
+            anchor="w",
+        )
+        self.status_label.pack(side="left", fill="x", expand=True, pady=4)
+
+        self.fps_label = tk.Label(
+            self.status_frame, text="",
+            font=("Arial", 9),
+            bg=THEME.surface, fg=THEME.text_muted,
+        )
+        self.fps_label.pack(side="right", padx=10, pady=4)
+
+    # ── Event handlers ──────────────────────────────────────────────
 
     def _language_changed(self, value: str) -> None:
         self.language_var.set(value)
         self.current_language = value
         self.engine.clear_cache()
-        self.status_bar.config(text=f"Language set to {value}", bg=THEME.title_bg)
+        self._set_status(f"Language: {value}", THEME.accent)
         logger.info("Language changed to %s", value)
+
+    def _threshold_changed(self, value: str) -> None:
+        self.threshold_label.config(text=f"{float(value):.2f}")
 
     def _gpu_changed(self) -> None:
         self.engine.clear_cache()
         self.engine._settings.gpu_enabled = self.gpu_var.get()
         status = "enabled" if self.gpu_var.get() else "disabled"
-        self.status_bar.config(text=f"GPU {status} (model will reload)", bg=THEME.title_bg)
+        self._set_status(f"GPU {status}", THEME.accent)
         logger.info("GPU %s", status)
 
     def start_capture(self) -> None:
@@ -217,12 +373,14 @@ class TextRecognitionApp:
             self.cap = cv2.VideoCapture(0)
             if not self.cap or not self.cap.isOpened():
                 raise RuntimeError("Unable to open webcam.")
-            self.status_bar.config(text="Webcam capture started", bg=THEME.success)
+            self._set_status("Webcam active", THEME.status_ready)
+            self.status_led.set_color(THEME.status_ready)
             logger.info("Webcam capture started")
         except Exception as exc:
             self.capture_active = False
             messagebox.showerror("Webcam Error", str(exc))
-            self.status_bar.config(text="Failed to start webcam", bg=THEME.danger)
+            self._set_status("Webcam error", THEME.status_error)
+            self.status_led.set_color(THEME.status_error)
             logger.error("Webcam error: %s", exc)
 
     def stop_capture(self) -> None:
@@ -230,7 +388,8 @@ class TextRecognitionApp:
             self.cap.release()
             self.cap = None
         self.capture_active = False
-        self.status_bar.config(text="Capture stopped", bg=THEME.danger)
+        self._set_status("Capture stopped", THEME.status_error)
+        self.status_led.set_color(THEME.status_ready)
         logger.info("Capture stopped")
 
     def load_image(self) -> None:
@@ -249,7 +408,8 @@ class TextRecognitionApp:
         self.stop_capture()
         self.current_frame = frame
         self._process_current_frame()
-        self.status_bar.config(text=f"Loaded image: {Path(path).name}", bg=THEME.primary)
+        self._set_status(f"Loaded: {Path(path).name}", THEME.accent)
+        self.status_led.set_color(THEME.status_ready)
         logger.info("Loaded image: %s", path)
 
     def _process_current_frame(self) -> None:
@@ -271,12 +431,14 @@ class TextRecognitionApp:
             callback=_on_result,
         )
         if queued:
-            self.status_bar.config(text="Processing...", bg=THEME.warning)
+            self._set_status("Processing...", THEME.status_busy)
+            self.status_led.set_color(THEME.status_busy)
 
     def _apply_ocr_result(self) -> None:
         with self.ocr_lock:
             if self.ocr_result is None or not self.ocr_result.success:
-                self.status_bar.config(text="OCR failed", bg=THEME.danger)
+                self._set_status("OCR failed", THEME.status_error)
+                self.status_led.set_color(THEME.status_error)
                 return
             self.detected_text = self.ocr_result.detections
 
@@ -284,7 +446,8 @@ class TextRecognitionApp:
         self._show_image(frame)
         self._update_text_output()
         self._add_to_history()
-        self.status_bar.config(text="Detection complete", bg=THEME.success)
+        self._set_status("Detection complete", THEME.status_ready)
+        self.status_led.set_color(THEME.status_ready)
 
     def update_frame(self) -> None:
         if self.capture_active and self.cap is not None and self.cap.isOpened():
@@ -293,15 +456,15 @@ class TextRecognitionApp:
                 self.current_frame = frame
                 self.frame_counter += 1
                 if self.frame_counter % SETTINGS.frame_skip == 0:
+                    self._show_image(frame)
                     self._process_current_frame()
-
-        self.root.after(50, self.update_frame)
+        self.root.after(33, self.update_frame)
 
     def _show_image(self, frame: np.ndarray) -> None:
         image = bgr_to_rgb(frame)
         pil_image = Image.fromarray(image)
         tk_image = ImageTk.PhotoImage(pil_image)
-        self.image_label.config(image=tk_image)
+        self.image_label.config(image=tk_image, text="")
         self.image_label.image = tk_image
 
     def _update_text_output(self) -> None:
@@ -309,9 +472,9 @@ class TextRecognitionApp:
         self.text_output.delete("1.0", tk.END)
         if self.detected_text:
             for _bbox, text, confidence in self.detected_text:
-                self.text_output.insert(tk.END, f"{text} (confidence: {confidence:.2f})\n")
+                self.text_output.insert(tk.END, f"{text} ({confidence:.2f})\n")
         else:
-            self.text_output.insert(tk.END, "No text detected yet.\n")
+            self.text_output.insert(tk.END, "No text detected.\n")
         self.text_output.config(state="disabled")
 
     def _add_to_history(self) -> None:
@@ -378,7 +541,7 @@ class TextRecognitionApp:
     def _save_json(self, path: Path) -> None:
         data = [
             {"text": text, "confidence": round(confidence, 2), "language": self.current_language}
-            for bbox, text, confidence in self.detected_text
+            for _bbox, text, confidence in self.detected_text
         ]
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
@@ -388,20 +551,22 @@ class TextRecognitionApp:
         self.current_frame = None
         self.detected_text = []
         self.ocr_result = None
-        self.image_label.config(image=None)
+        self.image_label.config(image=None, text="No image loaded")
         self.text_output.config(state="normal")
         self.text_output.delete("1.0", tk.END)
         self.text_output.insert(tk.END, "Ready. Load an image or start the webcam.")
         self.text_output.config(state="disabled")
-        self.status_bar.config(text="Cleared", bg=THEME.neutral)
+        self._set_status("Cleared", THEME.neutral)
+        self.status_led.set_color(THEME.status_ready)
 
     def show_about(self) -> None:
         messagebox.showinfo(
             "About",
-            "Text Recognition App v2.0\n\n"
-            "Developed using OpenCV, EasyOCR, and Tkinter.\n"
-            "Load images or use your webcam to detect text in real time.\n"
-            "Use the language selector, threshold slider, and GPU toggle to improve accuracy.",
+            "Text Detection App v2.0\n\n"
+            "Modern dark-themed interface.\n"
+            "Developed using OpenCV, EasyOCR, and Tkinter.\n\n"
+            "Features: threaded OCR, multi-language, GPU support,\n"
+            "export to TXT/CSV/JSON, detection history.",
         )
 
     def on_closing(self) -> None:
@@ -411,3 +576,8 @@ class TextRecognitionApp:
         self.engine.shutdown()
         self.root.destroy()
         logger.info("Application closed")
+
+    # ── Helpers ─────────────────────────────────────────────────────
+
+    def _set_status(self, text: str, bg_color: str) -> None:
+        self.status_label.config(text=text, fg=bg_color)
