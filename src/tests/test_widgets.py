@@ -43,6 +43,14 @@ class TestThemeableButton:
         )
         assert btn.btn.cget("text") == "Click me"
 
+    def test_init_with_tooltip(self, root):
+        btn = ThemeableButton(
+            root, "Click me", lambda: None,
+            bg=THEME.accent, active_bg=THEME.accent_active,
+            tooltip="Test tooltip",
+        )
+        assert btn.tooltip_text == "Test tooltip"
+
     def test_click(self, root):
         clicked = []
         btn = ThemeableButton(
@@ -61,3 +69,29 @@ class TestThemeableButton:
         assert btn.btn.cget("bg") == THEME.accent_active
         btn._on_leave()
         assert btn.btn.cget("bg") == THEME.accent
+
+    def test_tooltip_show_hide(self, root):
+        btn = ThemeableButton(
+            root, "Hover", lambda: None,
+            bg=THEME.accent, active_bg=THEME.accent_active,
+            tooltip="Test tooltip text",
+        )
+        # Simulate enter event
+        event = tk.Event()
+        event.x_root = 100
+        event.y_root = 100
+        btn._on_enter(event)
+        assert btn.tooltip_window is not None
+        btn._on_leave()
+        assert btn.tooltip_window is None
+
+    def test_tooltip_no_tooltip(self, root):
+        btn = ThemeableButton(
+            root, "Hover", lambda: None,
+            bg=THEME.accent, active_bg=THEME.accent_active,
+        )
+        event = tk.Event()
+        event.x_root = 100
+        event.y_root = 100
+        btn._on_enter(event)
+        assert btn.tooltip_window is None

@@ -61,6 +61,7 @@ class TextRecognitionApp:
 
         self._create_widgets()
         self._configure_icon()
+        self._bind_keyboard_shortcuts()
 
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.update_frame()
@@ -163,6 +164,7 @@ class TextRecognitionApp:
             fill="x",
             expand=True,
             pady=4,
+            tooltip="Start capturing from webcam",
         )
         self.stop_btn = ThemeableButton(
             self.sidebar,
@@ -175,6 +177,7 @@ class TextRecognitionApp:
             fill="x",
             expand=True,
             pady=4,
+            tooltip="Stop webcam capture",
         )
         self.load_btn = ThemeableButton(
             self.sidebar,
@@ -187,6 +190,7 @@ class TextRecognitionApp:
             fill="x",
             expand=True,
             pady=4,
+            tooltip="Load an image file (Ctrl+O)",
         )
         self.save_btn = ThemeableButton(
             self.sidebar,
@@ -199,6 +203,7 @@ class TextRecognitionApp:
             fill="x",
             expand=True,
             pady=4,
+            tooltip="Save detected text (Ctrl+S)",
         )
         self.clear_btn = ThemeableButton(
             self.sidebar,
@@ -211,6 +216,7 @@ class TextRecognitionApp:
             fill="x",
             expand=True,
             pady=4,
+            tooltip="Clear all results (Esc)",
         )
 
         tk.Frame(self.sidebar, bg=THEME.border, height=1).pack(fill="x", pady=(8, 4))
@@ -226,6 +232,7 @@ class TextRecognitionApp:
             fill="x",
             expand=True,
             pady=4,
+            tooltip="Show about dialog",
         )
 
         self.reset_btn = ThemeableButton(
@@ -239,6 +246,7 @@ class TextRecognitionApp:
             fill="x",
             expand=True,
             pady=4,
+            tooltip="Reset all settings to defaults (Ctrl+R)",
         )
 
     def _create_language_selector(self) -> None:
@@ -396,7 +404,23 @@ class TextRecognitionApp:
             fg=THEME.button_fg,
             padx=10,
             pady=8,
-        ).pack(anchor="w")
+        ).pack(side="left", anchor="w")
+
+        self.copy_btn = ThemeableButton(
+            self.text_header,
+            "📋 Copy Text",
+            self._copy_to_clipboard,
+            bg=THEME.accent_active,
+            active_bg=THEME.accent,
+            font="Arial",
+            font_size=9,
+            width=12,
+            side="right",
+            padx=4,
+            pady=4,
+            fill="none",
+            tooltip="Copy detected text to clipboard (Ctrl+C)",
+        )
 
         self.text_wrapper = tk.Frame(self.text_panel, bg=THEME.text_output_bg)
         self.text_wrapper.pack(fill="both", expand=True, padx=8, pady=8)
@@ -464,6 +488,32 @@ class TextRecognitionApp:
             fg=THEME.text_muted,
         )
         self.fps_label.pack(side="right", padx=10, pady=4)
+
+    # ── Keyboard shortcuts ──────────────────────────────────────────
+
+    def _bind_keyboard_shortcuts(self) -> None:
+        self.root.bind("<Control-o>", lambda _: self.load_image())
+        self.root.bind("<Control-s>", lambda _: self.save_results())
+        self.root.bind("<Control-c>", lambda _: self._copy_to_clipboard())
+        self.root.bind("<space>", lambda _: self._toggle_capture())
+        self.root.bind("<Control-r>", lambda _: self._reset_settings())
+        self.root.bind("<Escape>", lambda _: self.clear_results())
+
+    def _toggle_capture(self) -> None:
+        if self.capture_active:
+            self.stop_capture()
+        else:
+            self.start_capture()
+
+    def _copy_to_clipboard(self) -> None:
+        if not self.detected_text:
+            self._set_status("No text to copy", THEME.status_error)
+            return
+        text_only = "\n".join(text for _bbox, text, _confidence in self.detected_text)
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text_only)
+        self._set_status("Copied to clipboard", THEME.accent)
+        logger.info("Text copied to clipboard")
 
     # ── Event handlers ──────────────────────────────────────────────
 
