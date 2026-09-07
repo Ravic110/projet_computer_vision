@@ -15,13 +15,28 @@ def test_theme_colors_defaults() -> None:
 
 def test_app_settings_defaults() -> None:
     settings = AppSettings()
-    assert settings.default_language == "en"
+    assert settings.languages == ["en"]
     assert settings.default_confidence == 0.25
     assert settings.frame_skip == 15
     assert settings.max_history == 100
     assert settings.gpu_enabled is False
     assert settings.ocr_max_width == 800
     assert settings.paragraph_merge is False
+
+
+def test_app_settings_rejects_empty_languages() -> None:
+    with pytest.raises(ValueError, match="languages"):
+        AppSettings(languages=[])
+
+
+def test_app_settings_rejects_unknown_language() -> None:
+    with pytest.raises(ValueError, match="languages"):
+        AppSettings(languages=["en", "zz"])
+
+
+def test_app_settings_accepts_several_languages() -> None:
+    settings = AppSettings(languages=["fr", "en"])
+    assert settings.languages == ["fr", "en"]
 
 
 def test_app_settings_validate_language() -> None:

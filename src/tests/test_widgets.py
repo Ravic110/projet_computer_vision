@@ -95,3 +95,26 @@ class TestThemeableButton:
         event.y_root = 100
         btn._on_enter(event)
         assert btn.tooltip_window is None
+
+    def test_set_base_bg_survives_hover(self, root):
+        btn = ThemeableButton(
+            root, "Toggle", lambda: None,
+            bg=THEME.accent, active_bg=THEME.accent_active,
+        )
+        btn.set_base_bg(THEME.success, THEME.success_active)
+        assert btn.btn.cget("bg") == THEME.success
+        btn._on_enter()
+        assert btn.btn.cget("bg") == THEME.success_active
+        btn._on_leave()
+        assert btn.btn.cget("bg") == THEME.success
+
+    def test_set_base_bg_keeps_active_bg_when_omitted(self, root):
+        btn = ThemeableButton(
+            root, "Toggle", lambda: None,
+            bg=THEME.accent, active_bg=THEME.accent_active,
+        )
+        btn.set_base_bg(THEME.success)
+        btn._on_enter()
+        assert btn.btn.cget("bg") == THEME.accent_active
+        btn._on_leave()
+        assert btn.btn.cget("bg") == THEME.success

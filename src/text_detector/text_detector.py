@@ -14,7 +14,16 @@ import numpy as np
 from PIL import Image, ImageTk
 
 from text_detector.config import SETTINGS, THEME
-from text_detector.image_processor import bgr_to_rgb, draw_boxes_with_colors
+from text_detector.image_processor import (
+    NO_CONFIDENCE,
+    DisplayGeometry,
+    bgr_to_rgb,
+    compute_display_geometry,
+    draw_boxes_with_colors,
+    format_confidence,
+    offset_detections,
+    widget_rect_to_frame_roi,
+)
 from text_detector.ocr_engine import DetectionResult, OCREngine
 from text_detector.settings_manager import SettingsManager
 from text_detector.utils.logging_setup import get_logger
@@ -22,6 +31,10 @@ from text_detector.utils.path_helpers import get_assets_dir
 from text_detector.widgets import StatusLED, ThemeableButton
 
 logger = get_logger("gui")
+
+HISTORY_SEARCH_PLACEHOLDER = "Search history..."
+# Slider drags emit an event per pixel; coalesce the writes they trigger.
+SETTINGS_WRITE_DELAY_MS = 400
 
 
 class TextRecognitionApp:
@@ -37,7 +50,7 @@ class TextRecognitionApp:
 
         self._settings_manager = SettingsManager()
         loaded = self._settings_manager.load()
-        SETTINGS.default_language = loaded.default_language
+        SETTINGS.languages = loaded.languages
         SETTINGS.default_confidence = loaded.default_confidence
         SETTINGS.gpu_enabled = loaded.gpu_enabled
         SETTINGS.preprocess_enabled = loaded.preprocess_enabled
@@ -49,16 +62,25 @@ class TextRecognitionApp:
         self.frame_counter = 0
         self.detected_text: list[tuple] = []
         self.current_frame: np.ndarray | None = None
-        self.language_var = tk.StringVar(value=SETTINGS.default_language)
+        self.language_vars = {
+            code: tk.BooleanVar(value=code in SETTINGS.languages)
+            for code in SETTINGS.available_languages
+        }
         self.threshold_var = tk.DoubleVar(value=SETTINGS.default_confidence)
         self.frame_skip_var = tk.IntVar(value=SETTINGS.frame_skip)
         self.gpu_var = tk.BooleanVar(value=SETTINGS.gpu_enabled)
         self.preprocess_var = tk.BooleanVar(value=SETTINGS.preprocess_enabled)
-        self.history: list[dict[str, str | float]] = []
-        self.current_language: str = SETTINGS.default_language
+        self.paragraph_var = tk.BooleanVar(value=SETTINGS.paragraph_merge)
+        self.ocr_width_var = tk.IntVar(value=SETTINGS.ocr_max_width)
+        self.history: list[dict[str, str | float | None]] = []
+        self._history_view: list[int] = []
+        self.current_languages: list[str] = list(SETTINGS.languages)
         self.roi_mode = False
         self.roi: tuple[int, int, int, int] | None = None
         self._roi_start: tuple[int, int] | None = None
+        self._roi_at_submit: tuple[int, int, int, int] | None = None
+        self._display_geometry: DisplayGeometry | None = None
+        self._settings_write_job: str | None = None
 
         self.engine = OCREngine(SETTINGS)
         self.ocr_result: DetectionResult | None = None
@@ -130,6 +152,7 @@ class TextRecognitionApp:
         self._create_language_selector()
         self._create_threshold_slider()
         self._create_frame_skip_slider()
+        self._create_ocr_width_slider()
         self._create_gpu_toggle()
 
     def _create_sidebar_title(self) -> None:
@@ -284,40 +307,52 @@ class TextRecognitionApp:
         )
 
     def _create_language_selector(self) -> None:
+        """Build the language grid. EasyOCR reads several languages at once."""
         frame = tk.Frame(self.sidebar, bg=THEME.surface)
         frame.pack(fill="x", pady=2)
 
+        header = tk.Frame(frame, bg=THEME.surface)
+        header.pack(fill="x")
         tk.Label(
-            frame,
-            text="Language",
+            header,
+            text="Languages",
             font=("Arial", 9),
             bg=THEME.surface,
             fg=THEME.text_muted,
         ).pack(side="left", padx=(4, 0))
 
-        self.language_menu = tk.OptionMenu(
-            frame,
-            self.language_var,
-            *SETTINGS.available_languages,
-            command=self._language_changed,  # type: ignore[arg-type]
+        self.language_summary = tk.Label(
+            header,
+            text="+".join(self.current_languages),
+            font=("Arial", 9, "bold"),
+            bg=THEME.surface,
+            fg=THEME.accent,
         )
-        self.language_menu.config(
-            font=("Arial", 10),
-            bg=THEME.surface_light,
-            fg=THEME.text_fg,
-            activebackground=THEME.accent,
-            activeforeground=THEME.button_fg,
-            relief="flat",
-            borderwidth=0,
-            highlightthickness=0,
-        )
-        self.language_menu["menu"].config(
-            bg=THEME.surface_light,
-            fg=THEME.text_fg,
-            activebackground=THEME.accent,
-            activeforeground=THEME.button_fg,
-        )
-        self.language_menu.pack(side="right", fill="x", expand=True, padx=4)
+        self.language_summary.pack(side="right", padx=4)
+
+        grid = tk.Frame(frame, bg=THEME.surface)
+        grid.pack(fill="x", padx=4, pady=(2, 0))
+        grid.columnconfigure(0, weight=1)
+        grid.columnconfigure(1, weight=1)
+
+        self.language_checks: dict[str, tk.Checkbutton] = {}
+        for index, code in enumerate(SETTINGS.available_languages):
+            check = tk.Checkbutton(
+                grid,
+                text=code.upper(),
+                variable=self.language_vars[code],
+                command=self._languages_changed,
+                bg=THEME.surface,
+                fg=THEME.text_fg,
+                activebackground=THEME.surface,
+                activeforeground=THEME.accent,
+                selectcolor=THEME.surface_light,
+                highlightthickness=0,
+                anchor="w",
+                font=("Arial", 9),
+            )
+            check.grid(row=index // 2, column=index % 2, sticky="w")
+            self.language_checks[code] = check
 
     def _create_threshold_slider(self) -> None:
         frame = tk.Frame(self.sidebar, bg=THEME.surface)
@@ -399,6 +434,46 @@ class TextRecognitionApp:
         )
         self.frame_skip_scale.pack(fill="x", padx=4)
 
+    def _create_ocr_width_slider(self) -> None:
+        frame = tk.Frame(self.sidebar, bg=THEME.surface)
+        frame.pack(fill="x", pady=6)
+
+        tk.Label(
+            frame,
+            text="OCR Detail",
+            font=("Arial", 9),
+            bg=THEME.surface,
+            fg=THEME.text_muted,
+        ).pack(side="left", padx=(4, 0))
+
+        self.ocr_width_label = tk.Label(
+            frame,
+            text=f"{SETTINGS.ocr_max_width} px",
+            font=("Arial", 9, "bold"),
+            bg=THEME.surface,
+            fg=THEME.accent,
+        )
+        self.ocr_width_label.pack(side="right", padx=(4, 4))
+
+        self.ocr_width_scale = tk.Scale(
+            frame,
+            variable=self.ocr_width_var,
+            from_=400,
+            to=2000,
+            resolution=100,
+            orient="horizontal",
+            length=160,
+            bg=THEME.surface,
+            fg=THEME.text_fg,
+            highlightthickness=0,
+            activebackground=THEME.accent,
+            troughcolor=THEME.surface_light,
+            sliderrelief="flat",
+            borderwidth=0,
+            command=self._ocr_width_changed,
+        )
+        self.ocr_width_scale.pack(fill="x", padx=4)
+
     def _create_gpu_toggle(self) -> None:
         frame = tk.Frame(self.sidebar, bg=THEME.surface)
         frame.pack(fill="x", pady=6)
@@ -431,6 +506,21 @@ class TextRecognitionApp:
         )
         self.preprocess_check.pack(side="left", padx=4)
 
+        self.paragraph_check = tk.Checkbutton(
+            self.sidebar,
+            text="Merge into paragraphs",
+            variable=self.paragraph_var,
+            command=self._paragraph_changed,
+            bg=THEME.surface,
+            fg=THEME.text_fg,
+            activebackground=THEME.surface,
+            selectcolor=THEME.surface_light,
+            highlightthickness=0,
+            anchor="w",
+            font=("Arial", 9),
+        )
+        self.paragraph_check.pack(fill="x", padx=4)
+
     # ── Image area ──────────────────────────────────────────────────
 
     def _create_image_area(self) -> None:
@@ -442,11 +532,17 @@ class TextRecognitionApp:
         )
         self.center_paned.add(self.image_container)
 
+        # Border and internal padding are zeroed so that widget coordinates
+        # map onto the displayed image with a plain offset (see _show_image).
         self.image_label = tk.Label(
             self.image_container,
             bg=THEME.result_frame_bg,
             fg=THEME.text_muted,
             font=("Arial", 14),
+            borderwidth=0,
+            highlightthickness=0,
+            padx=0,
+            pady=0,
         )
         self.image_label.pack(fill="both", expand=True, padx=8, pady=8)
         self.image_label.config(text="No image loaded")
@@ -589,7 +685,7 @@ class TextRecognitionApp:
         )
         self.history_search.pack(fill="x", padx=4, pady=(4, 2))
         self.history_search.bind("<KeyRelease>", self._filter_history)
-        self.history_search.insert(0, "Search history...")
+        self.history_search.insert(0, HISTORY_SEARCH_PLACEHOLDER)
         self.history_search.bind("<FocusIn>", self._on_history_search_focus)
 
         self.history_listbox_frame = tk.Frame(self.history_tab, bg=THEME.text_output_bg)
@@ -670,14 +766,46 @@ class TextRecognitionApp:
 
     # ── Keyboard shortcuts ──────────────────────────────────────────
 
+    def _is_text_input(self, widget: object) -> bool:
+        """Report whether a widget is one that swallows plain keystrokes."""
+        return isinstance(widget, tk.Entry | tk.Text | ttk.Entry | ttk.Combobox)
+
+    def _is_text_input_focused(self, event: tk.Event | None = None) -> bool:
+        """Report whether keystrokes are currently going into a text field.
+
+        Prefers the widget the event came from: root-level key bindings fire
+        after the focused widget's own bindings, so event.widget identifies
+        the real target without depending on window-manager focus.
+        """
+        if event is not None and getattr(event, "widget", None) is not None:
+            return self._is_text_input(event.widget)
+        with contextlib.suppress(KeyError, tk.TclError):
+            return self._is_text_input(self.root.focus_get())
+        return False
+
+    def _shortcut(self, action):
+        """Wrap a shortcut so it never fires while the user is typing.
+
+        Shortcuts are bound on the root window, so plain keys such as
+        <space> and <Escape> would otherwise reach the history search box.
+        """
+
+        def handler(event=None):
+            if self._is_text_input_focused(event):
+                return None
+            action()
+            return "break"
+
+        return handler
+
     def _bind_keyboard_shortcuts(self) -> None:
-        self.root.bind("<Control-o>", lambda _: self.load_image())
-        self.root.bind("<Control-s>", lambda _: self.save_results())
-        self.root.bind("<Control-c>", lambda _: self._copy_to_clipboard())
-        self.root.bind("<Control-v>", lambda _: self._paste_image_from_clipboard())
-        self.root.bind("<space>", lambda _: self._toggle_capture())
-        self.root.bind("<Control-r>", lambda _: self._reset_settings())
-        self.root.bind("<Escape>", lambda _: self.clear_results())
+        self.root.bind("<Control-o>", self._shortcut(lambda: self.load_image()))
+        self.root.bind("<Control-s>", self._shortcut(lambda: self.save_results()))
+        self.root.bind("<Control-c>", self._shortcut(lambda: self._copy_to_clipboard()))
+        self.root.bind("<Control-v>", self._shortcut(lambda: self._paste_image_from_clipboard()))
+        self.root.bind("<space>", self._shortcut(lambda: self._toggle_capture()))
+        self.root.bind("<Control-r>", self._shortcut(lambda: self._reset_settings()))
+        self.root.bind("<Escape>", self._shortcut(lambda: self.clear_results()))
 
     def _toggle_capture(self) -> None:
         if self.capture_active:
@@ -698,20 +826,76 @@ class TextRecognitionApp:
     # ── Event handlers ──────────────────────────────────────────────
 
     def _save_settings(self) -> None:
-        """Persist current settings to disk."""
-        SETTINGS.default_language = self.language_var.get()
+        """Apply the UI values to SETTINGS now, write them to disk shortly after.
+
+        SETTINGS is what the OCR engine reads, so it is updated immediately.
+        The disk write is deferred and coalesced: dragging a slider emits one
+        event per pixel of travel, which would otherwise rewrite the file
+        dozens of times per gesture.
+        """
+        SETTINGS.languages = list(self.current_languages)
         SETTINGS.default_confidence = self.threshold_var.get()
         SETTINGS.frame_skip = self.frame_skip_var.get()
         SETTINGS.gpu_enabled = self.gpu_var.get()
         SETTINGS.preprocess_enabled = self.preprocess_var.get()
+        self._schedule_settings_write()
+
+    def _schedule_settings_write(self) -> None:
+        """(Re)arm the deferred write, cancelling any pending one."""
+        self._cancel_settings_write()
+        self._settings_write_job = self.root.after(
+            SETTINGS_WRITE_DELAY_MS, self._flush_settings_write
+        )
+
+    def _cancel_settings_write(self) -> None:
+        if self._settings_write_job is not None:
+            with contextlib.suppress(tk.TclError, ValueError):
+                self.root.after_cancel(self._settings_write_job)
+            self._settings_write_job = None
+
+    def _flush_settings_write(self) -> None:
+        """Write the settings to disk now, cancelling any deferred write."""
+        self._cancel_settings_write()
         self._settings_manager.save(SETTINGS)
 
-    def _language_changed(self, value: str) -> None:
-        self.language_var.set(value)
-        self.current_language = value
-        self.engine.clear_cache()
-        self._set_status(f"Language: {value}", THEME.accent)
-        logger.info("Language changed to %s", value)
+    def _selected_languages(self) -> list[str]:
+        """Return the ticked languages, in the order they are offered."""
+        return [code for code in SETTINGS.available_languages if self.language_vars[code].get()]
+
+    def _languages_changed(self) -> None:
+        """Apply the language grid, refusing an empty selection."""
+        selected = self._selected_languages()
+        if not selected:
+            # EasyOCR needs at least one language; put the last one back.
+            for code in self.current_languages:
+                self.language_vars[code].set(True)
+            self._set_status("Keep at least one language selected", THEME.status_error)
+            return
+
+        self.current_languages = selected
+        self.language_summary.config(text="+".join(selected))
+        # No cache clearing: readers are keyed by language combination, so a
+        # combination used before is reused instead of being reloaded.
+        self._set_status(f"Languages: {'+'.join(selected)}", THEME.accent)
+        logger.info("Languages changed to %s", selected)
+        self._save_settings()
+
+    def _paragraph_changed(self) -> None:
+        """Toggle paragraph mode and the controls it makes meaningless."""
+        enabled = self.paragraph_var.get()
+        SETTINGS.paragraph_merge = enabled
+        # Paragraph mode returns merged blocks with no confidence, so there
+        # is nothing left for the confidence threshold to filter.
+        self.threshold_scale.config(state="disabled" if enabled else "normal")
+        status = "enabled" if enabled else "disabled"
+        self._set_status(f"Paragraph merge {status}", THEME.accent)
+        logger.info("Paragraph merge %s", status)
+        self._save_settings()
+
+    def _ocr_width_changed(self, value: str) -> None:
+        width = int(float(value))
+        self.ocr_width_label.config(text=f"{width} px")
+        SETTINGS.ocr_max_width = width
         self._save_settings()
 
     def _threshold_changed(self, value: str) -> None:
@@ -739,23 +923,39 @@ class TextRecognitionApp:
         self._save_settings()
 
     def _reset_settings(self) -> None:
-        """Reset settings to defaults and reload UI."""
+        """Reset settings to defaults and reload the UI to match."""
+        self._cancel_settings_write()
         self._settings_manager.reset()
         defaults = self._settings_manager.load()
-        SETTINGS.default_language = defaults.default_language
+        SETTINGS.languages = list(defaults.languages)
         SETTINGS.default_confidence = defaults.default_confidence
         SETTINGS.gpu_enabled = defaults.gpu_enabled
         SETTINGS.preprocess_enabled = defaults.preprocess_enabled
         SETTINGS.frame_skip = defaults.frame_skip
         SETTINGS.ocr_max_width = defaults.ocr_max_width
         SETTINGS.paragraph_merge = defaults.paragraph_merge
-        self.language_var.set(SETTINGS.default_language)
+
+        # Every widget bound to a setting must follow, or the next save
+        # writes the stale value straight back over the reset.
+        for code, var in self.language_vars.items():
+            var.set(code in SETTINGS.languages)
+        self.language_summary.config(text="+".join(SETTINGS.languages))
         self.threshold_var.set(SETTINGS.default_confidence)
+        self.frame_skip_var.set(SETTINGS.frame_skip)
         self.gpu_var.set(SETTINGS.gpu_enabled)
         self.preprocess_var.set(SETTINGS.preprocess_enabled)
-        self.current_language = SETTINGS.default_language
+        self.paragraph_var.set(SETTINGS.paragraph_merge)
+        self.ocr_width_var.set(SETTINGS.ocr_max_width)
+        self.current_languages = list(SETTINGS.languages)
         self.threshold_label.config(text=f"{SETTINGS.default_confidence:.2f}")
-        self.engine = OCREngine(SETTINGS)
+        self.ocr_width_label.config(text=f"{SETTINGS.ocr_max_width} px")
+        self.threshold_scale.config(state="disabled" if SETTINGS.paragraph_merge else "normal")
+        self.frame_skip_label.config(text=f"Every {SETTINGS.frame_skip} frames")
+
+        # The engine already holds this same SETTINGS object, so it only
+        # needs its readers dropped; replacing it would strand the running
+        # worker thread and its cached models.
+        self.engine.clear_cache()
         self._set_status("Settings reset to defaults", THEME.neutral)
         logger.info("Settings reset to defaults")
 
@@ -815,6 +1015,10 @@ class TextRecognitionApp:
         if self.engine.is_busy:
             return
 
+        # Remember which ROI this frame was cropped with: the user may
+        # change it before the asynchronous result comes back.
+        self._roi_at_submit = self.roi
+
         def _on_result(result: DetectionResult) -> None:
             with self.ocr_lock:
                 self.ocr_result = result
@@ -822,7 +1026,7 @@ class TextRecognitionApp:
 
         queued = self.engine.detect_text_async(
             frame,
-            languages=[self.current_language],
+            languages=list(self.current_languages),
             threshold=self.threshold_var.get(),
             callback=_on_result,
         )
@@ -836,12 +1040,19 @@ class TextRecognitionApp:
                 self._set_status("OCR failed", THEME.status_error)
                 self.status_led.set_color(THEME.status_error)
                 return
-            self.detected_text = self.ocr_result.detections
+            detections = self.ocr_result.detections
+
+        # Detections are relative to the cropped ROI; move them back into
+        # full-frame coordinates so boxes land on the right pixels.
+        if self._roi_at_submit is not None:
+            detections = offset_detections(
+                detections, self._roi_at_submit[0], self._roi_at_submit[1]
+            )
+        self.detected_text = detections
 
         if self.current_frame is None:
             return
-        frame = draw_boxes_with_colors(self.current_frame.copy(), self.detected_text)
-        self._show_image(frame)
+        self._render_current_frame()
         self._update_text_output()
         self._add_to_history()
         self._set_status("Detection complete", THEME.status_ready)
@@ -859,18 +1070,48 @@ class TextRecognitionApp:
         self.root.after(33, self.update_frame)
 
     def _show_image(self, frame: np.ndarray) -> None:
-        image = bgr_to_rgb(frame)
-        pil_image = Image.fromarray(image)
+        """Display a full frame, scaled to fit, and record its placement.
+
+        The recorded geometry is what lets pointer coordinates be converted
+        back into frame coordinates for ROI selection.
+        """
+        pil_image = Image.fromarray(bgr_to_rgb(frame))
+        geometry = compute_display_geometry(
+            pil_image.width,
+            pil_image.height,
+            self.image_label.winfo_width(),
+            self.image_label.winfo_height(),
+        )
+        if (geometry.width, geometry.height) != (pil_image.width, pil_image.height):
+            # LANCZOS costs ~21 ms on a 720p frame, too much for the 33 ms
+            # capture loop; still images can afford the better filter.
+            resample = (
+                Image.Resampling.BILINEAR if self.capture_active else Image.Resampling.LANCZOS
+            )
+            pil_image = pil_image.resize((geometry.width, geometry.height), resample)
+        self._display_geometry = geometry
+
         tk_image = ImageTk.PhotoImage(pil_image)
         self.image_label.config(image=tk_image, text="")
         self.image_label.image = tk_image  # type: ignore[attr-defined]
+
+    def _render_current_frame(self) -> None:
+        """Redraw the current frame with its detection boxes, if any."""
+        if self.current_frame is None:
+            return
+        if self.detected_text:
+            self._show_image(draw_boxes_with_colors(self.current_frame, self.detected_text))
+        else:
+            self._show_image(self.current_frame)
 
     def _update_text_output(self) -> None:
         self.text_output.config(state="normal")
         self.text_output.delete("1.0", tk.END)
         if self.detected_text:
             for _bbox, text, confidence in self.detected_text:
-                self.text_output.insert(tk.END, f"{text} ({confidence:.2f})\n")
+                self.text_output.insert(
+                    tk.END, f"{text} ({format_confidence(confidence)})\n"
+                )
         else:
             self.text_output.insert(tk.END, "No text detected.\n")
         self.text_output.config(state="disabled")
@@ -880,8 +1121,8 @@ class TextRecognitionApp:
             self.history.append(
                 {
                     "text": text,
-                    "confidence": round(confidence, 2),
-                    "language": self.current_language,
+                    "confidence": None if confidence is None else round(confidence, 2),
+                    "language": "+".join(self.current_languages),
                     "timestamp": datetime.now().strftime("%H:%M:%S"),
                 }
             )
@@ -889,31 +1130,46 @@ class TextRecognitionApp:
             self.history = self.history[-SETTINGS.max_history :]
         self._refresh_history_display()
 
+    def _current_search_query(self) -> str:
+        """Return the active history filter, ignoring the placeholder text."""
+        query = self.history_search.get()
+        if query == HISTORY_SEARCH_PLACEHOLDER:
+            return ""
+        return query.lower()
+
     def _refresh_history_display(self) -> None:
+        """Repopulate the history listbox, honouring the active search filter."""
+        query = self._current_search_query()
+        self._history_view = []
         self.history_listbox.delete(0, tk.END)
-        for entry in self.history:
-            display = f"[{entry['timestamp']}] {entry['text']} ({entry['confidence']})"
-            self.history_listbox.insert(tk.END, display)
+        for index, entry in enumerate(self.history):
+            text = str(entry["text"])
+            if query and query not in text.lower():
+                continue
+            self._history_view.append(index)
+            confidence = entry["confidence"]
+            shown = NO_CONFIDENCE if confidence is None else confidence
+            line = f"[{entry['timestamp']}] {text} ({shown})"
+            language = entry.get("language")
+            if language:
+                line = f"{line} · {language}"
+            self.history_listbox.insert(tk.END, line)
 
     def _filter_history(self, _event=None) -> None:
-        query = self.history_search.get().lower()
-        self.history_listbox.delete(0, tk.END)
-        for entry in self.history:
-            text = str(entry["text"])
-            if query in text.lower():
-                display = f"[{entry['timestamp']}] {text} ({entry['confidence']})"
-                self.history_listbox.insert(tk.END, display)
+        self._refresh_history_display()
 
     def _on_history_search_focus(self, _event=None) -> None:
-        if self.history_search.get() == "Search history...":
+        if self.history_search.get() == HISTORY_SEARCH_PLACEHOLDER:
             self.history_search.delete(0, tk.END)
 
     def _copy_history_item(self, _event=None) -> None:
         sel = self.history_listbox.curselection()
         if not sel:
             return
-        idx = sel[0]
-        text = self.history[idx]["text"]
+        row = sel[0]
+        if row >= len(self._history_view):
+            return
+        text = self.history[self._history_view[row]]["text"]
         self.root.clipboard_clear()
         self.root.clipboard_append(text)
         self._set_status("Copied to clipboard", THEME.status_ready)
@@ -963,18 +1219,28 @@ class TextRecognitionApp:
     def _save_txt(self, path: Path) -> None:
         with open(path, "w", encoding="utf-8") as f:
             for _bbox, text, confidence in self.detected_text:
-                f.write(f"{text} (confidence: {confidence:.2f})\n")
+                f.write(f"{text} (confidence: {format_confidence(confidence)})\n")
 
     def _save_csv(self, path: Path) -> None:
         with open(path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow(["text", "confidence", "language"])
             for _bbox, text, confidence in self.detected_text:
-                writer.writerow([text, f"{confidence:.2f}", self.current_language])
+                writer.writerow(
+                    [
+                        text,
+                        "" if confidence is None else f"{confidence:.2f}",
+                        "+".join(self.current_languages),
+                    ]
+                )
 
     def _save_json(self, path: Path) -> None:
         data = [
-            {"text": text, "confidence": round(confidence, 2), "language": self.current_language}
+            {
+                "text": text,
+                "confidence": None if confidence is None else round(confidence, 2),
+                "language": "+".join(self.current_languages),
+            }
             for _bbox, text, confidence in self.detected_text
         ]
         with open(path, "w", encoding="utf-8") as f:
@@ -982,9 +1248,15 @@ class TextRecognitionApp:
 
     def clear_results(self) -> None:
         self.stop_capture()
+        if self.roi_mode:
+            self._toggle_roi_mode()
         self.current_frame = None
         self.detected_text = []
         self.ocr_result = None
+        self.roi = None
+        self._roi_start = None
+        self._roi_at_submit = None
+        self._display_geometry = None
         self.image_label.config(image="", text="No image loaded")  # type: ignore[arg-type]
         self.text_output.config(state="normal")
         self.text_output.delete("1.0", tk.END)
@@ -1005,6 +1277,7 @@ class TextRecognitionApp:
 
     def on_closing(self) -> None:
         self._save_settings()
+        self._flush_settings_write()
         self.capture_active = False
         if self.cap is not None:
             self.cap.release()
@@ -1016,41 +1289,66 @@ class TextRecognitionApp:
         self.roi_mode = not self.roi_mode
         if self.roi_mode:
             self.roi_btn.config(text="✓ ROI Active")
-            self.roi_btn.config(bg=THEME.success)
+            self.roi_btn.set_base_bg(THEME.success, THEME.success_active)
             self._set_status("ROI mode: click and drag on image", THEME.accent)
             self.image_label.bind("<Button-1>", self._on_roi_click)
             self.image_label.bind("<B1-Motion>", self._on_roi_drag)
             self.image_label.bind("<ButtonRelease-1>", self._on_roi_release)
         else:
             self.roi_btn.config(text="▣ Select ROI")
-            self.roi_btn.config(bg=THEME.accent)
+            self.roi_btn.set_base_bg(THEME.accent, THEME.accent_active)
             self.image_label.unbind("<Button-1>")
             self.image_label.unbind("<B1-Motion>")
             self.image_label.unbind("<ButtonRelease-1>")
+
+    def _widget_rect_to_roi(
+        self,
+        start: tuple[int, int],
+        end: tuple[int, int],
+        min_size: int = 10,
+    ) -> tuple[int, int, int, int] | None:
+        """Map a drag in image_label coordinates onto the current frame."""
+        if self.current_frame is None or self._display_geometry is None:
+            return None
+        height, width = self.current_frame.shape[:2]
+        return widget_rect_to_frame_roi(
+            start, end, self._display_geometry, width, height, min_size=min_size
+        )
 
     def _on_roi_click(self, event: tk.Event) -> None:
         self._roi_start = (event.x, event.y)
 
     def _on_roi_drag(self, event: tk.Event) -> None:
-        if self._roi_start and self.current_frame is not None:
-            x1, y1 = self._roi_start
-            self.image_label.config(
-                relief="solid",
-                borderwidth=2,
-            )
+        """Draw a rubber band over the frame while the selection is dragged."""
+        if self._roi_start is None or self.current_frame is None:
+            return
+        preview = self._widget_rect_to_roi(self._roi_start, (event.x, event.y), min_size=1)
+        if preview is None:
+            return
+        frame = (
+            draw_boxes_with_colors(self.current_frame, self.detected_text)
+            if self.detected_text
+            else self.current_frame.copy()
+        )
+        cv2.rectangle(frame, (preview[0], preview[1]), (preview[2], preview[3]), (250, 180, 137), 2)
+        self._show_image(frame)
 
     def _on_roi_release(self, event: tk.Event) -> None:
-        if self._roi_start and self.current_frame is not None:
-            x1, y1 = self._roi_start
-            x2, y2 = event.x, event.y
-            if abs(x2 - x1) > 10 and abs(y2 - y1) > 10:
-                self.roi = (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
+        start, self._roi_start = self._roi_start, None
+
+        if start is not None and self.current_frame is not None:
+            roi = self._widget_rect_to_roi(start, (event.x, event.y))
+            if roi is None:
+                self._set_status("Selection too small - ROI unchanged", THEME.status_error)
+            else:
+                self.roi = roi
                 self._set_status(
-                    f"ROI set: ({self.roi[0]}, {self.roi[1]}) to ({self.roi[2]}, {self.roi[3]})",
+                    f"ROI set: ({roi[0]}, {roi[1]}) to ({roi[2]}, {roi[3]})",
                     THEME.status_ready,
                 )
-            self.image_label.config(relief="flat", borderwidth=0)
-            self._roi_start = None
+            self._render_current_frame()
+
+        if self.roi_mode:
             self._toggle_roi_mode()
 
     def _clear_roi(self) -> None:
@@ -1061,8 +1359,19 @@ class TextRecognitionApp:
         if self.current_frame is None:
             return None
         if self.roi:
-            x1, y1, x2, y2 = self.roi
-            return self.current_frame[y1:y2, x1:x2]
+            height, width = self.current_frame.shape[:2]
+            x1 = max(0, min(self.roi[0], width))
+            y1 = max(0, min(self.roi[1], height))
+            x2 = max(x1, min(self.roi[2], width))
+            y2 = max(y1, min(self.roi[3], height))
+            crop = self.current_frame[y1:y2, x1:x2]
+            if crop.size == 0:
+                # The ROI no longer intersects the frame (e.g. a smaller
+                # image was loaded); drop it rather than crop to nothing.
+                self.roi = None
+                self._set_status("ROI outside image - cleared", THEME.status_error)
+                return self.current_frame
+            return crop
         return self.current_frame
 
     # ── Helpers ─────────────────────────────────────────────────────

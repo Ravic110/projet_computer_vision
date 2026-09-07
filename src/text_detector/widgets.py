@@ -43,9 +43,13 @@ class ThemeableButton:
     def _show_tooltip(self, event=None) -> None:
         if not self.tooltip_text or self.tooltip_window:
             return
+        if event is not None:
+            x, y = event.x_root, event.y_root
+        else:
+            x, y = self.btn.winfo_pointerxy()
         tooltip = tk.Toplevel(self.btn)
         tooltip.wm_overrideredirect(True)
-        tooltip.wm_geometry(f"+{event.x_root + 10}+{event.y_root + 10}")
+        tooltip.wm_geometry(f"+{x + 10}+{y + 10}")
         label = tk.Label(
             tooltip,
             text=self.tooltip_text,
@@ -73,6 +77,21 @@ class ThemeableButton:
     def _on_leave(self, _event=None) -> None:
         self.btn.config(bg=self.bg, fg=self.normal_fg)
         self._hide_tooltip()
+
+    def set_base_bg(self, bg: str, active_bg: str | None = None) -> None:
+        """Change the button's resting color so hover does not undo it.
+
+        Setting the background with config() alone is reverted by the next
+        <Leave> event, which restores the original color.
+
+        Args:
+            bg: New resting background color.
+            active_bg: New hover background color, or None to keep the current one.
+        """
+        self.bg = bg
+        if active_bg is not None:
+            self.active_bg = active_bg
+        self.btn.config(bg=bg, activebackground=self.active_bg)
 
     def config(self, **kwargs) -> None:
         self.btn.config(**kwargs)

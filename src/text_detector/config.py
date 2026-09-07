@@ -45,7 +45,7 @@ class AppSettings:
     available_languages: list[str] = field(
         default_factory=lambda: ["en", "fr", "de", "es", "it", "pt"]
     )
-    default_language: str = "en"
+    languages: list[str] = field(default_factory=lambda: ["en"])
     min_confidence: float = 0.05
     max_confidence: float = 0.8
     default_confidence: float = 0.25
@@ -58,6 +58,11 @@ class AppSettings:
     paragraph_merge: bool = False
 
     def __post_init__(self) -> None:
+        if not self.languages:
+            raise ValueError("languages must contain at least one language code")
+        unknown = [lang for lang in self.languages if lang not in self.available_languages]
+        if unknown:
+            raise ValueError(f"languages contains unsupported codes: {unknown}")
         if not (0.0 <= self.min_confidence <= 1.0):
             raise ValueError("min_confidence must be between 0.0 and 1.0")
         if not (0.0 <= self.max_confidence <= 1.0):

@@ -9,15 +9,36 @@ from typing import Any
 import numpy as np
 
 from text_detector.config import AppSettings
-from text_detector.image_processor import preprocess_for_ocr, resize_frame_for_ocr, scale_detections
+from text_detector.image_processor import (
+    filter_text,
+    preprocess_for_ocr,
+    resize_frame_for_ocr,
+    scale_detections,
+)
 from text_detector.utils.logging_setup import get_logger
 
 logger = get_logger("ocr_engine")
 
 _MAX_CACHE_SIZE = 2
+_MAX_PENDING_RESULTS = 16
 
 BBox = list[list[float]]
-Detection = tuple[BBox, str, float]
+Detection = tuple[BBox, str, float | None]
+
+
+def _normalise_results(raw_results: list) -> list[Detection]:
+    """Bring EasyOCR output to a single (bbox, text, confidence) shape.
+
+    In paragraph mode EasyOCR merges word boxes into blocks and returns
+    [bbox, text] with no confidence at all, so the third slot is filled
+    with None rather than an invented score.
+    """
+    detections: list[Detection] = []
+    for item in raw_results:
+        bbox, text = item[0], item[1]
+        confidence = item[2] if len(item) > 2 else None
+        detections.append((bbox, text, confidence))
+    return detections
 
 
 @dataclass
@@ -41,7 +62,9 @@ class OCREngine:
         self._settings = settings or AppSettings()
         self._cache: dict[tuple[str, ...], Any] = {}
         self._lock = threading.Lock()
-        self._result_queue: queue.Queue[DetectionResult] = queue.Queue()
+        self._result_queue: queue.Queue[DetectionResult] = queue.Queue(
+            maxsize=_MAX_PENDING_RESULTS
+        )
         self._work_queue: queue.Queue[tuple] = queue.Queue(maxsize=1)
         self._worker_thread: threading.Thread | None = None
         self._running = True
@@ -71,7 +94,7 @@ class OCREngine:
                 logger.error("OCR worker error: %s", e)
                 result = DetectionResult(
                     detections=[],
-                    languages=languages or [self._settings.default_language],
+                    languages=languages or list(self._settings.languages),
                     success=False,
                     error=str(e),
                 )
@@ -80,8 +103,24 @@ class OCREngine:
 
             if callback:
                 callback(result)
-            self._result_queue.put(result)
+            self._publish_result(result)
             self._work_queue.task_done()
+
+    def _publish_result(self, result: DetectionResult) -> None:
+        """Queue a result for get_result(), discarding the oldest if full.
+
+        Callers that only use the callback never drain this queue, so it
+        must stay bounded rather than grow for the life of the process.
+        """
+        while True:
+            try:
+                self._result_queue.put_nowait(result)
+                return
+            except queue.Full:
+                try:
+                    self._result_queue.get_nowait()
+                except queue.Empty:  # pragma: no cover - drained concurrently
+                    continue
 
     def _evict_cache_if_needed(self) -> None:
         """Evict oldest cached model if cache exceeds max size."""
@@ -131,7 +170,7 @@ class OCREngine:
         Returns:
             DetectionResult with detections and metadata.
         """
-        langs = languages or [self._settings.default_language]
+        langs = languages or list(self._settings.languages)
         conf_threshold = threshold if threshold is not None else self._settings.default_confidence
 
         try:
@@ -143,7 +182,8 @@ class OCREngine:
                 ocr_frame,
                 paragraph=self._settings.paragraph_merge,
             )
-            detections = [item for item in raw_results if item[2] >= conf_threshold]
+            detections = _normalise_results(raw_results)
+            detections = filter_text(detections, conf_threshold)
             detections = scale_detections(detections, 1.0 / scale)
             return DetectionResult(detections=detections, languages=langs)
         except Exception as e:
