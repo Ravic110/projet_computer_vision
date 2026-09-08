@@ -8,10 +8,23 @@ from .config import THEME
 class ThemeableButton:
     """Factory for creating styled buttons with hover effects and tooltips."""
 
-    def __init__(self, master, text: str, command, bg: str, active_bg: str,
-                 font: str = "Arial", font_size: int = 11, width: int = 14,
-                 side: str = "top", padx: int = 0, pady: int = 4,
-                 fill: str = "x", expand: bool = False, tooltip: str = ""):
+    def __init__(
+        self,
+        master,
+        text: str,
+        command,
+        bg: str,
+        active_bg: str,
+        font: str = "Arial",
+        font_size: int = 11,
+        width: int = 14,
+        side: str = "top",
+        padx: int = 0,
+        pady: int = 4,
+        fill: str = "x",
+        expand: bool = False,
+        tooltip: str = "",
+    ):
         self.bg = bg
         self.active_bg = active_bg
         self.normal_fg = THEME.button_fg
@@ -104,15 +117,20 @@ class StatusLED:
         self.color = color
         self.size = size
         self.canvas = tk.Canvas(
-            master, width=size, height=size,
-            bg=THEME.background, highlightthickness=0,
+            master,
+            width=size,
+            height=size,
+            bg=THEME.background,
+            highlightthickness=0,
         )
         self._draw()
 
     def _draw(self) -> None:
+        # set_color redraws on every status change; without the delete the
+        # canvas would keep every past oval for the life of the session.
+        self.canvas.delete("all")
         r = self.size // 2
-        self.canvas.create_oval(1, 1, r * 2 - 1, r * 2 - 1,
-                                fill=self.color, outline="")
+        self.canvas.create_oval(1, 1, r * 2 - 1, r * 2 - 1, fill=self.color, outline="")
 
     def set_color(self, color: str) -> None:
         self.color = color

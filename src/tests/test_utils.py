@@ -1,15 +1,12 @@
 """Tests for utility modules."""
 
-import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
 from text_detector.utils.logging_setup import get_logger, setup_logging
 from text_detector.utils.path_helpers import (
-    ensure_dir,
     get_assets_dir,
     get_project_root,
-    get_safe_path,
 )
 
 
@@ -25,40 +22,13 @@ def test_get_assets_dir_returns_path() -> None:
     assert result.name == "assets"
 
 
-def test_ensure_dir_creates_directory() -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        target = Path(tmp) / "new" / "nested" / "dir"
-        assert not target.exists()
-        ensure_dir(target)
-        assert target.exists()
-        assert target.is_dir()
+def test_assets_live_inside_the_package() -> None:
+    """The icon must ship with the package, not sit beside the repository."""
+    import text_detector
 
-
-def test_ensure_dir_existing_directory() -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        target = Path(tmp) / "existing"
-        target.mkdir()
-        result = ensure_dir(target)
-        assert result.exists()
-        assert result == target
-
-
-def test_get_safe_path_adds_extension() -> None:
-    base = Path("/tmp/test")
-    result = get_safe_path(base, "output", ".txt")
-    assert result.name == "output.txt"
-
-
-def test_get_safe_path_keeps_existing_extension() -> None:
-    base = Path("/tmp/test")
-    result = get_safe_path(base, "output.txt", ".txt")
-    assert result.name == "output.txt"
-
-
-def test_get_safe_path_mismatched_extension() -> None:
-    base = Path("/tmp/test")
-    result = get_safe_path(base, "output.txt", ".csv")
-    assert result.name == "output.txt.csv"
+    assets = get_assets_dir()
+    assert assets.parent == Path(text_detector.__file__).parent
+    assert (assets / "icon.ico").exists()
 
 
 def test_setup_logging_fallback(caplog) -> None:
@@ -71,3 +41,25 @@ def test_setup_logging_fallback(caplog) -> None:
 def test_get_logger_prefix() -> None:
     logger = get_logger("ocr_engine")
     assert logger.name == "text_detector.ocr_engine"
+
+
+def test_get_log_path_honours_xdg_state_home(tmp_path, monkeypatch) -> None:
+    from text_detector.utils.path_helpers import get_log_path
+
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    assert get_log_path() == tmp_path / "text-detector" / "text_detector.log"
+
+
+def test_setup_logging_does_not_write_into_the_working_directory(tmp_path, monkeypatch) -> None:
+    """The log belongs in a fixed place, not wherever the app was launched."""
+    state = tmp_path / "state"
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.setenv("XDG_STATE_HOME", str(state))
+    monkeypatch.chdir(cwd)
+
+    setup_logging()
+    get_logger("probe").info("hello")
+
+    assert not (cwd / "text_detector.log").exists()
+    assert (state / "text-detector" / "text_detector.log").exists()

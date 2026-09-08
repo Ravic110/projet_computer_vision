@@ -1,6 +1,10 @@
 """Path utilities using pathlib."""
 
+import os
 from pathlib import Path
+
+APP_DIR_NAME = "text-detector"
+LOG_FILE_NAME = "text_detector.log"
 
 
 def get_project_root() -> Path:
@@ -9,18 +13,25 @@ def get_project_root() -> Path:
 
 
 def get_assets_dir() -> Path:
-    """Return the assets directory."""
-    return get_project_root() / "text_detector" / "assets"
+    """Return the packaged assets directory.
+
+    The assets live inside the package so they survive an install; a path
+    relative to the repository root only resolves in a source checkout.
+    """
+    return Path(__file__).parent.parent / "assets"
 
 
-def ensure_dir(path: Path) -> Path:
-    """Ensure a directory exists and return it."""
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+def get_state_dir() -> Path:
+    """Return the directory for the app's own state files.
+
+    Follows XDG_STATE_HOME so the log has one predictable home, instead of
+    landing in whatever directory the app happened to be launched from.
+    """
+    base = os.environ.get("XDG_STATE_HOME")
+    root = Path(base) if base else Path.home() / ".local" / "state"
+    return root / APP_DIR_NAME
 
 
-def get_safe_path(base: Path, filename: str, extension: str) -> Path:
-    """Return a safe file path with the given extension."""
-    if not filename.endswith(extension):
-        filename = f"{filename}{extension}"
-    return base / filename
+def get_log_path() -> Path:
+    """Return the full path of the application log file."""
+    return get_state_dir() / LOG_FILE_NAME

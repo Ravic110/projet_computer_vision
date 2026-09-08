@@ -96,32 +96,6 @@ def filter_text(
     return [item for item in detections if item[2] is None or item[2] >= threshold]
 
 
-def compute_avg_color(frame: np.ndarray, bbox: list[list[float]]) -> tuple[float, float, float]:
-    """Compute average color within a bounding box region.
-
-    Args:
-        frame: OpenCV image array (BGR).
-        bbox: Bounding box coordinates from EasyOCR.
-
-    Returns:
-        Average (B, G, R) color tuple, or (0, 0, 0) if region is invalid.
-    """
-    points = [(int(pt[0]), int(pt[1])) for pt in bbox]
-    x1 = max(0, points[0][0])
-    y1 = max(0, points[0][1])
-    x2 = max(0, points[2][0])
-    y2 = max(0, points[2][1])
-
-    if y2 <= y1 or x2 <= x1:
-        return (0.0, 0.0, 0.0)
-
-    roi = frame[y1:y2, x1:x2]
-    if roi.size == 0:
-        return (0.0, 0.0, 0.0)
-
-    return cv2.mean(roi)[:3]
-
-
 def draw_boxes_with_colors(
     frame: np.ndarray,
     detections: list[Detection],
@@ -172,14 +146,27 @@ def bgr_to_rgb(frame: np.ndarray) -> np.ndarray:
     return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
 
+# Diameter of the bilateral filter's pixel neighbourhood. Kept small: the
+# filter runs on the frame OCR reads, where text strokes are a few pixels
+# wide and a wider window smears them together.
+_DENOISE_DIAMETER = 5
+
+
 def preprocess_for_ocr(
     frame: np.ndarray,
     strength: int = 10,
 ) -> np.ndarray:
-    """Preprocess image for improved OCR accuracy.
+    """Reduce noise before OCR without softening the text.
 
-    Converts to grayscale, applies non-local means denoising, then
-    converts back to 3-channel BGR for EasyOCR compatibility.
+    Converts to grayscale, applies a bilateral filter, then converts back
+    to 3-channel BGR for EasyOCR compatibility.
+
+    The filter is bilateral rather than non-local means because text is
+    edges: both preserve them, but measured on a noisy 800px frame the
+    bilateral filter reached the same recognition for 12 ms against 249 ms.
+    Simply narrowing the non-local means search window was tried and is not
+    an alternative -- it drops to the accuracy of no filtering at all while
+    still costing 77-162 ms.
 
     Args:
         frame: OpenCV image array (BGR or grayscale).
@@ -190,11 +177,11 @@ def preprocess_for_ocr(
     """
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if len(frame.shape) == 3 else frame.copy()
 
-    denoised = cv2.fastNlMeansDenoising(
+    denoised = cv2.bilateralFilter(
         gray,
-        h=strength,
-        templateWindowSize=7,
-        searchWindowSize=21,
+        _DENOISE_DIAMETER,
+        sigmaColor=strength * 5,
+        sigmaSpace=strength * 5,
     )
 
     return cv2.cvtColor(denoised, cv2.COLOR_GRAY2BGR)
@@ -258,6 +245,33 @@ def compute_display_geometry(
         width=width,
         height=height,
     )
+
+
+def resize_frame_for_display(
+    frame: np.ndarray,
+    geometry: DisplayGeometry,
+    smooth: bool = False,
+) -> np.ndarray:
+    """Scale a frame to the size it will occupy on screen.
+
+    Resizing here rather than in PIL is what keeps the preview inside its
+    33 ms budget: on a 720p frame PIL's resize costs around 19 ms against
+    roughly 1 ms for OpenCV's.
+
+    Args:
+        frame: OpenCV image array (BGR).
+        geometry: Placement computed by compute_display_geometry.
+        smooth: Use the slower, better filter. Worth it for a still image,
+            not for live video.
+
+    Returns:
+        The resized frame, or the original when it already fits.
+    """
+    if (frame.shape[1], frame.shape[0]) == (geometry.width, geometry.height):
+        return frame
+
+    interpolation = cv2.INTER_AREA if smooth else cv2.INTER_LINEAR
+    return cv2.resize(frame, (geometry.width, geometry.height), interpolation=interpolation)
 
 
 def widget_to_frame_point(
@@ -326,6 +340,70 @@ def widget_rect_to_frame_roi(
         return None
 
     return (left, top, right, bottom)
+
+
+def scale_horizontal_boxes(
+    boxes: list,
+    factor: float,
+    width: int,
+    height: int,
+) -> list[list[int]]:
+    """Move EasyOCR horizontal boxes onto a frame of a different size.
+
+    Detection runs on a smaller frame than recognition, so the boxes it
+    reports have to be scaled up before the text inside them can be read.
+    EasyOCR gives these as [x_min, x_max, y_min, y_max], not as polygons.
+
+    Args:
+        boxes: Boxes as [x_min, x_max, y_min, y_max], in detection space.
+        factor: Recognition scale divided by detection scale.
+        width: Target frame width, used to clip.
+        height: Target frame height, used to clip.
+
+    Returns:
+        Boxes in the target frame's coordinates, clipped to it.
+    """
+    return [
+        [
+            max(0, min(width, int(round(x_min * factor)))),
+            max(0, min(width, int(round(x_max * factor)))),
+            max(0, min(height, int(round(y_min * factor)))),
+            max(0, min(height, int(round(y_max * factor)))),
+        ]
+        for x_min, x_max, y_min, y_max in boxes
+    ]
+
+
+def scale_free_boxes(
+    polygons: list,
+    factor: float,
+    width: int,
+    height: int,
+) -> list[list[list[int]]]:
+    """Move EasyOCR free-form boxes onto a frame of a different size.
+
+    These are the boxes for rotated text, reported as point lists rather
+    than as edges.
+
+    Args:
+        polygons: Point lists, in detection space.
+        factor: Recognition scale divided by detection scale.
+        width: Target frame width, used to clip.
+        height: Target frame height, used to clip.
+
+    Returns:
+        Point lists in the target frame's coordinates, clipped to it.
+    """
+    return [
+        [
+            [
+                max(0, min(width, int(round(x * factor)))),
+                max(0, min(height, int(round(y * factor)))),
+            ]
+            for x, y in polygon
+        ]
+        for polygon in polygons
+    ]
 
 
 def offset_detections(

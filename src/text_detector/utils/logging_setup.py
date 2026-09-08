@@ -12,13 +12,21 @@ def setup_logging(config_path: Path | None = None) -> None:
         config_path: Path to logging configuration file.
             Defaults to logging.conf in project root.
     """
-    if config_path is None:
-        from text_detector.utils.path_helpers import get_project_root
+    from text_detector.utils.path_helpers import get_log_path, get_project_root
 
+    if config_path is None:
         config_path = get_project_root() / "logging.conf"
 
     if config_path.exists():
-        logging.config.fileConfig(config_path, disable_existing_loggers=False)
+        log_path = get_log_path()
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        # The handler's filename is injected rather than hardcoded in the
+        # .conf, which can only express a path relative to the CWD.
+        logging.config.fileConfig(
+            config_path,
+            defaults={"logfilename": str(log_path)},
+            disable_existing_loggers=False,
+        )
     else:
         logging.basicConfig(
             level=logging.INFO,

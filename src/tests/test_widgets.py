@@ -33,20 +33,32 @@ class TestStatusLED:
         root.update()
         assert led.canvas.winfo_width() > 0
 
+    def test_set_color_does_not_accumulate_canvas_items(self, root):
+        led = StatusLED(root, size=10)
+        for color in (THEME.status_busy, THEME.status_error, THEME.status_ready):
+            led.set_color(color)
+        assert len(led.canvas.find_all()) == 1
+
 
 class TestThemeableButton:
     def test_init(self, root):
         clicked = []
         btn = ThemeableButton(
-            root, "Click me", lambda: clicked.append(True),
-            bg=THEME.accent, active_bg=THEME.accent_active,
+            root,
+            "Click me",
+            lambda: clicked.append(True),
+            bg=THEME.accent,
+            active_bg=THEME.accent_active,
         )
         assert btn.btn.cget("text") == "Click me"
 
     def test_init_with_tooltip(self, root):
         btn = ThemeableButton(
-            root, "Click me", lambda: None,
-            bg=THEME.accent, active_bg=THEME.accent_active,
+            root,
+            "Click me",
+            lambda: None,
+            bg=THEME.accent,
+            active_bg=THEME.accent_active,
             tooltip="Test tooltip",
         )
         assert btn.tooltip_text == "Test tooltip"
@@ -54,16 +66,22 @@ class TestThemeableButton:
     def test_click(self, root):
         clicked = []
         btn = ThemeableButton(
-            root, "Click", lambda: clicked.append(True),
-            bg=THEME.accent, active_bg=THEME.accent_active,
+            root,
+            "Click",
+            lambda: clicked.append(True),
+            bg=THEME.accent,
+            active_bg=THEME.accent_active,
         )
         btn.btn.invoke()
         assert clicked == [True]
 
     def test_hover_colors(self, root):
         btn = ThemeableButton(
-            root, "Hover", lambda: None,
-            bg=THEME.accent, active_bg=THEME.accent_active,
+            root,
+            "Hover",
+            lambda: None,
+            bg=THEME.accent,
+            active_bg=THEME.accent_active,
         )
         btn._on_enter()
         assert btn.btn.cget("bg") == THEME.accent_active
@@ -72,8 +90,11 @@ class TestThemeableButton:
 
     def test_tooltip_show_hide(self, root):
         btn = ThemeableButton(
-            root, "Hover", lambda: None,
-            bg=THEME.accent, active_bg=THEME.accent_active,
+            root,
+            "Hover",
+            lambda: None,
+            bg=THEME.accent,
+            active_bg=THEME.accent_active,
             tooltip="Test tooltip text",
         )
         # Simulate enter event
@@ -87,8 +108,11 @@ class TestThemeableButton:
 
     def test_tooltip_no_tooltip(self, root):
         btn = ThemeableButton(
-            root, "Hover", lambda: None,
-            bg=THEME.accent, active_bg=THEME.accent_active,
+            root,
+            "Hover",
+            lambda: None,
+            bg=THEME.accent,
+            active_bg=THEME.accent_active,
         )
         event = tk.Event()
         event.x_root = 100
@@ -98,8 +122,11 @@ class TestThemeableButton:
 
     def test_set_base_bg_survives_hover(self, root):
         btn = ThemeableButton(
-            root, "Toggle", lambda: None,
-            bg=THEME.accent, active_bg=THEME.accent_active,
+            root,
+            "Toggle",
+            lambda: None,
+            bg=THEME.accent,
+            active_bg=THEME.accent_active,
         )
         btn.set_base_bg(THEME.success, THEME.success_active)
         assert btn.btn.cget("bg") == THEME.success
@@ -110,8 +137,11 @@ class TestThemeableButton:
 
     def test_set_base_bg_keeps_active_bg_when_omitted(self, root):
         btn = ThemeableButton(
-            root, "Toggle", lambda: None,
-            bg=THEME.accent, active_bg=THEME.accent_active,
+            root,
+            "Toggle",
+            lambda: None,
+            bg=THEME.accent,
+            active_bg=THEME.accent_active,
         )
         btn.set_base_bg(THEME.success)
         btn._on_enter()

@@ -5,15 +5,17 @@ import numpy as np
 from text_detector.image_processor import (
     Detection,
     bgr_to_rgb,
-    compute_avg_color,
     compute_display_geometry,
     draw_boxes_with_colors,
     filter_text,
     format_confidence,
     offset_detections,
     preprocess_for_ocr,
+    resize_frame_for_display,
     resize_frame_for_ocr,
     scale_detections,
+    scale_free_boxes,
+    scale_horizontal_boxes,
     widget_rect_to_frame_roi,
     widget_to_frame_point,
 )
@@ -47,21 +49,6 @@ def test_filter_text_exact_threshold() -> None:
     detections = [_make_detection("exact", 0.5)]
     result = filter_text(detections, threshold=0.5)
     assert len(result) == 1
-
-
-def test_compute_avg_color_uniform() -> None:
-    frame = np.zeros((100, 100, 3), dtype=np.uint8)
-    frame[:, :, 0] = 255  # Blue channel
-    bbox = [[10.0, 10.0], [50.0, 10.0], [50.0, 50.0], [10.0, 50.0]]
-    result = compute_avg_color(frame, bbox)
-    assert result[0] == 255.0  # Blue
-
-
-def test_compute_avg_color_invalid_bbox() -> None:
-    frame = np.zeros((100, 100, 3), dtype=np.uint8)
-    bbox = [[50.0, 50.0], [10.0, 50.0], [10.0, 10.0], [50.0, 10.0]]
-    result = compute_avg_color(frame, bbox)
-    assert result == (0.0, 0.0, 0.0)
 
 
 def test_draw_boxes_returns_same_shape() -> None:
@@ -276,3 +263,84 @@ def test_format_confidence_renders_a_value() -> None:
 
 def test_format_confidence_renders_absence() -> None:
     assert format_confidence(None) == "—"
+
+
+class TestResizeForDisplay:
+    def test_frame_is_resized_to_the_display_geometry(self):
+        frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+        geometry = compute_display_geometry(1280, 720, 900, 600)
+        resized = resize_frame_for_display(frame, geometry)
+        assert resized.shape[:2] == (geometry.height, geometry.width)
+
+    def test_a_frame_that_already_fits_is_returned_untouched(self):
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        geometry = compute_display_geometry(100, 100, 900, 600)
+        assert resize_frame_for_display(frame, geometry) is frame
+
+    def test_smooth_and_fast_paths_agree_on_the_output_size(self):
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        geometry = compute_display_geometry(640, 480, 320, 240)
+        fast = resize_frame_for_display(frame, geometry, smooth=False)
+        smooth = resize_frame_for_display(frame, geometry, smooth=True)
+        assert fast.shape == smooth.shape == (geometry.height, geometry.width, 3)
+
+
+class TestScaleDetectionBoxes:
+    """Boxes found on a small frame have to move onto a larger one.
+
+    EasyOCR reports horizontal boxes as [x_min, x_max, y_min, y_max] and
+    rotated ones as four-point polygons, so the two need separate handling.
+    """
+
+    def test_horizontal_boxes_scale_and_stay_ints(self) -> None:
+        boxes = scale_horizontal_boxes([[10, 50, 20, 40]], 2.0, 1000, 1000)
+        assert boxes == [[20, 100, 40, 80]]
+        assert all(isinstance(value, int) for value in boxes[0])
+
+    def test_horizontal_boxes_are_clipped_to_the_frame(self) -> None:
+        boxes = scale_horizontal_boxes([[-5, 900, -10, 700]], 2.0, 800, 600)
+        assert boxes == [[0, 800, 0, 600]]
+
+    def test_free_polygons_scale_point_by_point(self) -> None:
+        polygons = scale_free_boxes([[[10, 20], [30, 20], [30, 40], [10, 40]]], 2.0, 1000, 1000)
+        assert polygons == [[[20, 40], [60, 40], [60, 80], [20, 80]]]
+
+    def test_free_polygons_are_clipped_to_the_frame(self) -> None:
+        polygons = scale_free_boxes([[[-4, -4], [900, 700]]], 2.0, 800, 600)
+        assert polygons == [[[0, 0], [800, 600]]]
+
+    def test_a_factor_of_one_leaves_boxes_alone(self) -> None:
+        assert scale_horizontal_boxes([[1, 2, 3, 4]], 1.0, 100, 100) == [[1, 2, 3, 4]]
+        assert scale_free_boxes([[[1, 2]]], 1.0, 100, 100) == [[[1, 2]]]
+
+    def test_empty_input(self) -> None:
+        assert scale_horizontal_boxes([], 2.0, 10, 10) == []
+        assert scale_free_boxes([], 2.0, 10, 10) == []
+
+    def test_numpy_integers_are_accepted(self) -> None:
+        # EasyOCR returns np.int32 coordinates.
+        boxes = scale_horizontal_boxes(
+            [[np.int32(10), np.int32(50), np.int32(20), np.int32(40)]], 2.0, 1000, 1000
+        )
+        assert boxes == [[20, 100, 40, 80]]
+        assert all(isinstance(value, int) for value in boxes[0])
+
+
+def test_preprocess_keeps_edges_sharp_while_cutting_noise() -> None:
+    """The property that makes a denoiser usable for text.
+
+    Text is edges. A filter that removes noise by softening them costs
+    more accuracy than the noise did, so the contract is: less noise in
+    flat areas, undiminished contrast across a boundary.
+    """
+    rng = np.random.default_rng(0)
+    frame = np.zeros((100, 100, 3), dtype=np.uint8)
+    frame[:, 50:] = 255
+    noisy = np.clip(frame.astype(np.int16) + rng.normal(0, 25, frame.shape), 0, 255).astype(
+        np.uint8
+    )
+
+    result = preprocess_for_ocr(noisy)
+
+    assert result[:, 10:40, 0].std() < noisy[:, 10:40, 0].std()
+    assert int(result[50, 60, 0]) - int(result[50, 40, 0]) > 200

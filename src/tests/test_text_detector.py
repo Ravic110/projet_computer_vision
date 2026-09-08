@@ -7,16 +7,24 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
+from text_detector.layout import COMPACT, LARGE, MEDIUM, MIN_WINDOW
+from text_detector.ocr_engine import OCREngine
 from text_detector.text_detector import TextRecognitionApp
 
 
 @pytest.fixture
 def app():
-    """Create a TextRecognitionApp instance with mocked root."""
+    """Create a TextRecognitionApp instance with a hidden root window."""
     root = tk.Tk()
     root.withdraw()
-    app = TextRecognitionApp(root)
+    # Never load a real OCR model in tests: it costs seconds and a download.
+    with patch.object(OCREngine, "preload"):
+        app = TextRecognitionApp(root)
     yield app
+    # Without this the OCR worker and capture threads outlive every test,
+    # leaving hundreds of them alive by the end of the suite.
+    app.stop_capture()
+    app.engine.shutdown()
     root.destroy()
 
 
@@ -39,19 +47,19 @@ class TestCopyToClipboard:
 
 class TestKeyboardShortcuts:
     def test_bind_keyboard_shortcuts_calls_bind(self, app):
-        with patch.object(app.root, 'bind') as mock_bind:
+        with patch.object(app.root, "bind") as mock_bind:
             app._bind_keyboard_shortcuts()
-            assert mock_bind.call_count == 7
+            assert mock_bind.call_count == 8
 
     def test_toggle_capture_starts_when_stopped(self, app):
         app.capture_active = False
-        with patch.object(app, 'start_capture') as mock_start:
+        with patch.object(app, "start_capture") as mock_start:
             app._toggle_capture()
             mock_start.assert_called_once()
 
     def test_toggle_capture_stops_when_running(self, app):
         app.capture_active = True
-        with patch.object(app, 'stop_capture') as mock_stop:
+        with patch.object(app, "stop_capture") as mock_stop:
             app._toggle_capture()
             mock_stop.assert_called_once()
 
@@ -59,13 +67,13 @@ class TestKeyboardShortcuts:
 class TestToggleCapture:
     def test_toggle_capture_starts_when_stopped(self, app):
         app.capture_active = False
-        with patch.object(app, 'start_capture') as mock_start:
+        with patch.object(app, "start_capture") as mock_start:
             app._toggle_capture()
             mock_start.assert_called_once()
 
     def test_toggle_capture_stops_when_running(self, app):
         app.capture_active = True
-        with patch.object(app, 'stop_capture') as mock_stop:
+        with patch.object(app, "stop_capture") as mock_stop:
             app._toggle_capture()
             mock_stop.assert_called_once()
 
@@ -80,10 +88,12 @@ class TestFrameSkipSlider:
         app.frame_skip_var.set(10)
         app._frame_skip_changed("10")
         from text_detector.config import SETTINGS
+
         assert SETTINGS.frame_skip == 10
 
     def test_frame_skip_var_initialized_from_settings(self, app):
         from text_detector.config import SETTINGS
+
         assert app.frame_skip_var.get() == SETTINGS.frame_skip
 
     def test_frame_skip_scale_has_correct_range(self, app):
@@ -93,24 +103,25 @@ class TestFrameSkipSlider:
 
 class TestPasteImageFromClipboard:
     def test_paste_image_creates_context_menu(self, app):
-        assert hasattr(app, 'image_context_menu')
-        assert hasattr(app, '_paste_image_from_clipboard')
+        assert hasattr(app, "image_context_menu")
+        assert hasattr(app, "_paste_image_from_clipboard")
 
     def test_paste_image_no_image_in_clipboard(self, app):
         with (
-            patch('PIL.ImageGrab.grabclipboard', return_value=None),
-            patch('tkinter.messagebox.showinfo') as mock_msg,
+            patch("PIL.ImageGrab.grabclipboard", return_value=None),
+            patch("tkinter.messagebox.showinfo") as mock_msg,
         ):
             app._paste_image_from_clipboard()
             mock_msg.assert_called_once()
 
     def test_paste_image_with_valid_image(self, app):
         from PIL import Image
-        mock_image = Image.new('RGB', (100, 100), color='red')
+
+        mock_image = Image.new("RGB", (100, 100), color="red")
         with (
-            patch('PIL.ImageGrab.grabclipboard', return_value=mock_image),
-            patch.object(app, '_process_current_frame') as mock_process,
-            patch.object(app, 'stop_capture') as mock_stop,
+            patch("PIL.ImageGrab.grabclipboard", return_value=mock_image),
+            patch.object(app, "_process_current_frame") as mock_process,
+            patch.object(app, "stop_capture") as mock_stop,
         ):
             app._paste_image_from_clipboard()
             mock_stop.assert_called_once()
@@ -119,17 +130,19 @@ class TestPasteImageFromClipboard:
 
     def test_paste_image_invalid_content(self, app):
         with (
-            patch('PIL.ImageGrab.grabclipboard', return_value="not an image"),
-            patch('tkinter.messagebox.showerror') as mock_msg,
+            patch("PIL.ImageGrab.grabclipboard", return_value="not an image"),
+            patch("tkinter.messagebox.showerror") as mock_msg,
         ):
             app._paste_image_from_clipboard()
             mock_msg.assert_called_once()
 
     def test_ctrl_v_bound_in_shortcuts(self, app):
         bindings = []
+
         def mock_bind(sequence, func):
             bindings.append(sequence)
-        with patch.object(app.root, 'bind', mock_bind):
+
+        with patch.object(app.root, "bind", mock_bind):
             app._bind_keyboard_shortcuts()
             assert "<Control-v>" in bindings
 
@@ -191,6 +204,7 @@ class TestROISelection:
 
     def test_get_cropped_frame_without_roi(self, app):
         import numpy as np
+
         app.current_frame = np.zeros((100, 100, 3), dtype=np.uint8)
         app.roi = None
         result = app._get_cropped_frame()
@@ -198,6 +212,7 @@ class TestROISelection:
 
     def test_get_cropped_frame_with_roi(self, app):
         import numpy as np
+
         app.current_frame = np.zeros((100, 100, 3), dtype=np.uint8)
         app.roi = (10, 20, 50, 60)
         result = app._get_cropped_frame()
@@ -294,12 +309,17 @@ class TestShortcutGuard:
         bound = {}
         with patch.object(app.root, "bind", lambda seq, fn: bound.__setitem__(seq, fn)):
             app._bind_keyboard_shortcuts()
-        assert len(bound) == 7
+        assert len(bound) == 8
 
         targets = [
-            "load_image", "save_results", "_copy_to_clipboard",
-            "_paste_image_from_clipboard", "_toggle_capture",
-            "_reset_settings", "clear_results",
+            "load_image",
+            "save_results",
+            "_copy_to_clipboard",
+            "_paste_image_from_clipboard",
+            "_toggle_capture",
+            "_reset_settings",
+            "clear_results",
+            "_toggle_picker_mode",
         ]
         with (
             patch.object(app.root, "focus_get", return_value=app.history_search),
@@ -339,6 +359,7 @@ class TestDisplayGeometry:
 class TestROIMapping:
     def _prepare(self, app, frame_w=100, frame_h=100, widget=400):
         from text_detector.image_processor import compute_display_geometry
+
         app.current_frame = np.zeros((frame_h, frame_w, 3), dtype=np.uint8)
         app._display_geometry = compute_display_geometry(frame_w, frame_h, widget, widget)
         return app._display_geometry
@@ -402,6 +423,7 @@ class TestROIMapping:
 
     def test_toggle_roi_mode_button_colour_survives_hover(self, app):
         from text_detector.config import THEME
+
         app._toggle_roi_mode()
         app.roi_btn._on_enter()
         app.roi_btn._on_leave()
@@ -433,6 +455,7 @@ class TestROIMapping:
 class TestDetectionOffsets:
     def test_detections_are_translated_back_to_full_frame(self, app):
         from text_detector.ocr_engine import DetectionResult
+
         app.current_frame = np.zeros((200, 200, 3), dtype=np.uint8)
         app.roi = (50, 60, 150, 160)
         app._roi_at_submit = (50, 60, 150, 160)
@@ -444,6 +467,7 @@ class TestDetectionOffsets:
 
     def test_detections_untouched_without_roi(self, app):
         from text_detector.ocr_engine import DetectionResult
+
         app.current_frame = np.zeros((200, 200, 3), dtype=np.uint8)
         app.roi = None
         app._roi_at_submit = None
@@ -481,18 +505,21 @@ class TestDetectionOffsets:
 class TestResetSettings:
     def test_reset_restores_frame_skip_slider(self, app):
         from text_detector.config import AppSettings
+
         app.frame_skip_var.set(42)
         app._reset_settings()
         assert app.frame_skip_var.get() == AppSettings().frame_skip
 
     def test_reset_updates_frame_skip_label(self, app):
         from text_detector.config import AppSettings
+
         app.frame_skip_var.set(42)
         app._reset_settings()
         assert app.frame_skip_label.cget("text") == f"Every {AppSettings().frame_skip} frames"
 
     def test_reset_is_not_undone_by_the_next_save(self, app):
         from text_detector.config import SETTINGS, AppSettings
+
         app.frame_skip_var.set(42)
         app._reset_settings()
         app._save_settings()
@@ -500,6 +527,7 @@ class TestResetSettings:
 
     def test_reset_reuses_the_ocr_engine(self, app):
         import threading
+
         engine = app.engine
         before = threading.active_count()
         app._reset_settings()
@@ -523,6 +551,7 @@ class TestSettingsWriteDebounce:
 
     def test_settings_object_is_updated_immediately(self, app):
         from text_detector.config import SETTINGS
+
         with patch.object(app._settings_manager, "save"):
             app.frame_skip_var.set(7)
             app._frame_skip_changed("7")
@@ -549,16 +578,19 @@ class TestSettingsWriteDebounce:
 class TestLanguageSelection:
     def test_one_checkbutton_per_available_language(self, app):
         from text_detector.config import SETTINGS
+
         assert sorted(app.language_vars) == sorted(SETTINGS.available_languages)
 
     def test_selection_starts_from_settings(self, app):
         from text_detector.config import SETTINGS
+
         assert app.current_languages == list(SETTINGS.languages)
         for code, var in app.language_vars.items():
             assert var.get() is (code in SETTINGS.languages)
 
     def test_enabling_a_language_adds_it(self, app):
         from text_detector.config import SETTINGS
+
         with patch.object(app._settings_manager, "save"):
             app.language_vars["fr"].set(True)
             app._languages_changed()
@@ -567,6 +599,7 @@ class TestLanguageSelection:
 
     def test_selection_keeps_the_available_order(self, app):
         from text_detector.config import SETTINGS
+
         with patch.object(app._settings_manager, "save"):
             app.language_vars["fr"].set(True)
             app.language_vars["de"].set(True)
@@ -600,6 +633,7 @@ class TestLanguageSelection:
 
     def test_detection_uses_every_selected_language(self, app):
         import numpy as np
+
         app.current_frame = np.zeros((50, 50, 3), dtype=np.uint8)
         with patch.object(app.engine, "detect_text_async", return_value=True) as detect:
             app.current_languages = ["fr", "en"]
@@ -608,6 +642,7 @@ class TestLanguageSelection:
 
     def test_reset_restores_the_default_language_selection(self, app):
         from text_detector.config import AppSettings
+
         with patch.object(app._settings_manager, "save"):
             app.language_vars["fr"].set(True)
             app._languages_changed()
@@ -619,6 +654,7 @@ class TestLanguageSelection:
 class TestParagraphMode:
     def test_toggle_updates_the_setting(self, app):
         from text_detector.config import SETTINGS
+
         with patch.object(app._settings_manager, "save"):
             app.paragraph_var.set(True)
             app._paragraph_changed()
@@ -638,10 +674,12 @@ class TestParagraphMode:
 class TestOcrMaxWidth:
     def test_slider_starts_from_settings(self, app):
         from text_detector.config import SETTINGS
+
         assert app.ocr_width_var.get() == SETTINGS.ocr_max_width
 
     def test_change_updates_the_setting_and_label(self, app):
         from text_detector.config import SETTINGS
+
         with patch.object(app._settings_manager, "save"):
             app.ocr_width_var.set(1200)
             app._ocr_width_changed("1200")
@@ -680,6 +718,7 @@ class TestMissingConfidenceRendering:
 
     def test_csv_export_leaves_the_cell_empty(self, app, tmp_path):
         import csv
+
         app.current_languages = ["fr"]
         app.detected_text = [self._para_detection()]
         path = tmp_path / "out.csv"
@@ -689,6 +728,7 @@ class TestMissingConfidenceRendering:
 
     def test_json_export_uses_null(self, app, tmp_path):
         import json as json_mod
+
         app.current_languages = ["fr", "en"]
         app.detected_text = [self._para_detection()]
         path = tmp_path / "out.json"
@@ -696,3 +736,378 @@ class TestMissingConfidenceRendering:
         data = json_mod.loads(path.read_text())
         assert data[0]["confidence"] is None
         assert data[0]["language"] == "fr+en"
+
+
+class _StubGrabber:
+    """Frame source that hands out canned frames to update_frame."""
+
+    def __init__(self, frames):
+        self._frames = list(frames)
+        self.stopped = False
+
+    def read(self):
+        return self._frames.pop(0) if self._frames else None
+
+    def stop(self):
+        self.stopped = True
+
+    @property
+    def is_running(self):
+        return not self.stopped
+
+
+class TestFramePreviewCadence:
+    """The preview must stay smooth while OCR stays throttled."""
+
+    def _run_capture(self, app, ticks, frame_skip):
+        from text_detector.config import SETTINGS
+
+        original = SETTINGS.frame_skip
+        SETTINGS.frame_skip = frame_skip
+        app.capture_active = True
+        app._grabber = _StubGrabber([np.zeros((20, 20, 3), dtype=np.uint8) for _ in range(ticks)])
+        try:
+            with (
+                patch.object(app.root, "after"),
+                patch.object(app, "_render_current_frame") as render,
+                patch.object(app, "_process_current_frame") as process,
+            ):
+                for _ in range(ticks):
+                    app.update_frame()
+            return render, process
+        finally:
+            SETTINGS.frame_skip = original
+
+    def test_every_captured_frame_is_displayed(self, app):
+        render, _process = self._run_capture(app, ticks=6, frame_skip=3)
+        assert render.call_count == 6
+
+    def test_ocr_runs_only_on_every_nth_frame(self, app):
+        _render, process = self._run_capture(app, ticks=6, frame_skip=3)
+        assert process.call_count == 2
+
+
+class TestOcrResultDelivery:
+    """OCR results must reach the GUI on the Tk thread, never from the worker."""
+
+    def test_submission_registers_no_cross_thread_callback(self, app):
+        app.current_frame = np.zeros((50, 50, 3), dtype=np.uint8)
+        with patch.object(app.engine, "detect_text_async", return_value=True) as detect:
+            app._process_current_frame()
+        assert detect.call_args.kwargs.get("callback") is None
+
+    def test_finished_results_are_applied_from_the_main_loop(self, app):
+        from text_detector.ocr_engine import DetectionResult
+
+        app.current_frame = np.zeros((200, 200, 3), dtype=np.uint8)
+        bbox = [[1.0, 1.0], [2.0, 1.0], [2.0, 2.0], [1.0, 2.0]]
+        result = DetectionResult(detections=[(bbox, "Hi", 0.9)], languages=["en"])
+        with (
+            patch.object(app.engine, "poll_result", return_value=result),
+            patch.object(app.root, "after"),
+        ):
+            app.update_frame()
+        assert [text for _bbox, text, _conf in app.detected_text] == ["Hi"]
+
+    def test_idle_main_loop_applies_nothing(self, app):
+        app.detected_text = []
+        with (
+            patch.object(app.engine, "poll_result", return_value=None),
+            patch.object(app, "_apply_ocr_result") as apply_result,
+            patch.object(app.root, "after"),
+        ):
+            app.update_frame()
+        apply_result.assert_not_called()
+
+
+class TestStatusRecovery:
+    def test_status_leaves_the_busy_state_when_the_frame_is_gone(self, app):
+        from text_detector.config import THEME
+        from text_detector.ocr_engine import DetectionResult
+
+        app.current_frame = None
+        app.ocr_result = DetectionResult(detections=[], languages=["en"])
+        app.status_led.set_color(THEME.status_busy)
+        app._set_status("Processing...", THEME.status_busy)
+        app._apply_ocr_result()
+        assert app.status_led.color != THEME.status_busy
+        assert "Processing" not in app.status_label.cget("text")
+
+
+class TestEngineSettingsWiring:
+    """The GUI must configure the engine through its public surface."""
+
+    def test_gpu_toggle_reaches_the_engine_settings(self, app):
+        with patch.object(app._settings_manager, "save"):
+            app.gpu_var.set(True)
+            app._gpu_changed()
+        assert app.engine.settings.gpu_enabled is True
+
+    def test_preprocess_toggle_reaches_the_engine_settings(self, app):
+        with patch.object(app._settings_manager, "save"):
+            app.preprocess_var.set(False)
+            app._preprocess_changed()
+        assert app.engine.settings.preprocess_enabled is False
+
+
+class TestCaptureLifecycle:
+    def test_start_capture_reports_a_camera_that_will_not_open(self, app):
+        with (
+            patch("text_detector.text_detector.FrameGrabber") as grabber_cls,
+            patch("tkinter.messagebox.showerror") as error_box,
+        ):
+            grabber_cls.return_value.start.side_effect = RuntimeError("Unable to open webcam.")
+            app.start_capture()
+        error_box.assert_called_once()
+        assert app.capture_active is False
+
+    def test_stop_capture_stops_the_grabber(self, app):
+        grabber = _StubGrabber([])
+        app._grabber = grabber
+        app.capture_active = True
+        app.stop_capture()
+        assert grabber.stopped is True
+        assert app.capture_active is False
+        assert app._grabber is None
+
+
+class TestVersionDisplay:
+    """The version shown in the UI must not drift from the package."""
+
+    def test_sidebar_shows_the_package_version(self, app):
+        from text_detector import __version__
+
+        assert __version__ in app.version_label.cget("text")
+
+    def test_about_dialog_shows_the_package_version(self, app):
+        from unittest.mock import patch as _patch
+
+        from text_detector import __version__
+
+        with _patch("tkinter.messagebox.showinfo") as info:
+            app.show_about()
+        assert __version__ in info.call_args.args[1]
+
+
+class TestColorPicker:
+    def _prepare(self, app, bgr=(0, 0, 255), frame_w=100, frame_h=100, widget=400):
+        from text_detector.image_processor import compute_display_geometry
+
+        frame = np.zeros((frame_h, frame_w, 3), dtype=np.uint8)
+        frame[:, :] = bgr
+        app.current_frame = frame
+        app._display_geometry = compute_display_geometry(frame_w, frame_h, widget, widget)
+        return app._display_geometry
+
+    def _event(self, x, y):
+        event = tk.Event()
+        event.x = x
+        event.y = y
+        return event
+
+    def test_picker_starts_inactive(self, app):
+        assert not app.picker_mode
+        assert app.color_sample is None
+
+    def test_toggle_activates_and_deactivates(self, app):
+        self._prepare(app)
+        app._toggle_picker_mode()
+        assert app.picker_mode
+        app._toggle_picker_mode()
+        assert not app.picker_mode
+
+    def test_picker_without_frame_stays_inactive(self, app):
+        app.current_frame = None
+        app._toggle_picker_mode()
+        assert not app.picker_mode
+        assert "No image" in app.status_label.cget("text")
+
+    def test_activating_picker_cancels_roi_mode(self, app):
+        self._prepare(app)
+        app._toggle_roi_mode()
+        assert app.roi_mode
+        app._toggle_picker_mode()
+        assert app.picker_mode
+        assert not app.roi_mode
+
+    def test_activating_roi_cancels_picker_mode(self, app):
+        self._prepare(app)
+        app._toggle_picker_mode()
+        assert app.picker_mode
+        app._toggle_roi_mode()
+        assert app.roi_mode
+        assert not app.picker_mode
+
+    def test_click_reads_the_colour_under_the_cursor(self, app):
+        self._prepare(app, bgr=(0, 0, 255))
+        app._toggle_picker_mode()
+        app._on_pick_click(self._event(200, 200))
+        assert app.color_sample is not None
+        assert app.color_sample.rgb == (255, 0, 0)
+        assert app.color_sample.name == "red"
+        assert app.color_swatch.cget("bg") == "#ff0000"
+        assert "red" in app.color_name_label.cget("text")
+        assert "#ff0000" in app.color_value_label.cget("text")
+
+    def test_click_leaves_picker_mode(self, app):
+        self._prepare(app)
+        app._toggle_picker_mode()
+        app._on_pick_click(self._event(200, 200))
+        assert not app.picker_mode
+
+    def test_click_samples_the_raw_frame_not_the_drawn_boxes(self, app):
+        self._prepare(app, bgr=(0, 0, 255))
+        app.detected_text = [
+            ([[0, 0], [100, 0], [100, 100], [0, 100]], "hello", 0.9),
+        ]
+        app._toggle_picker_mode()
+        app._on_pick_click(self._event(200, 200))
+        assert app.color_sample.rgb == (255, 0, 0)
+
+    def test_click_without_frame_is_ignored(self, app):
+        app.current_frame = None
+        app._display_geometry = None
+        app._on_pick_click(self._event(200, 200))
+        assert app.color_sample is None
+
+    def test_copy_colour_puts_the_hex_on_the_clipboard(self, app):
+        self._prepare(app, bgr=(0, 0, 255))
+        app._toggle_picker_mode()
+        app._on_pick_click(self._event(200, 200))
+        app._copy_color()
+        assert app.root.clipboard_get() == "#ff0000"
+        assert "#ff0000" in app.status_label.cget("text")
+
+    def test_copy_colour_without_a_sample(self, app):
+        app.color_sample = None
+        app._copy_color()
+        assert "No color" in app.status_label.cget("text")
+
+    def test_clear_results_resets_the_swatch(self, app):
+        self._prepare(app, bgr=(0, 0, 255))
+        app._toggle_picker_mode()
+        app._on_pick_click(self._event(200, 200))
+        app.clear_results()
+        assert app.color_sample is None
+        assert not app.picker_mode
+        assert app.color_name_label.cget("text") == "—"
+
+
+class TestResponsiveLayout:
+    def _panes(self, app):
+        return [str(pane) for pane in app.main_paned.panes()]
+
+    def test_window_declares_a_minimum_size(self, app):
+        assert tuple(app.root.minsize()) == MIN_WINDOW
+
+    def test_large_layout_places_text_beside_image(self, app):
+        app._apply_layout(LARGE)
+        assert app.center_paned.cget("orient") == "horizontal"
+        assert str(app.sidebar_container) in self._panes(app)
+
+    def test_medium_layout_stacks_text_under_image(self, app):
+        app._apply_layout(MEDIUM)
+        assert app.center_paned.cget("orient") == "vertical"
+        assert str(app.sidebar_container) in self._panes(app)
+
+    def test_compact_layout_hides_the_sidebar(self, app):
+        app._apply_layout(COMPACT)
+        assert app.center_paned.cget("orient") == "vertical"
+        assert str(app.sidebar_container) not in self._panes(app)
+
+    def test_leaving_compact_restores_the_sidebar_first(self, app):
+        app._apply_layout(COMPACT)
+        app._apply_layout(LARGE)
+        assert self._panes(app)[0] == str(app.sidebar_container)
+
+    def test_toggle_hides_and_restores_the_sidebar(self, app):
+        app._apply_layout(LARGE)
+        app._toggle_sidebar()
+        assert str(app.sidebar_container) not in self._panes(app)
+        app._toggle_sidebar()
+        assert self._panes(app)[0] == str(app.sidebar_container)
+
+    def test_sidebar_content_is_scrollable(self, app):
+        app.root.update_idletasks()
+        assert app.sidebar.winfo_reqheight() > 0
+        assert app.sidebar_canvas.cget("scrollregion") != ""
+
+    def test_resize_applies_the_new_breakpoint(self, app):
+        app._apply_layout(LARGE)
+        with patch.object(app.root, "winfo_width", return_value=700):
+            app._handle_resize()
+        assert app._breakpoint == COMPACT
+        assert str(app.sidebar_container) not in self._panes(app)
+
+    def test_resize_redraws_the_current_frame(self, app):
+        with (
+            patch.object(app, "_render_current_frame") as render,
+            patch.object(app.root, "winfo_width", return_value=1200),
+        ):
+            app._handle_resize()
+        render.assert_called_once()
+
+    def test_configure_events_are_debounced(self, app):
+        event = tk.Event()
+        event.widget = app.root
+        app._on_root_configure(event)
+        first = app._resize_job
+        assert first is not None
+        app._on_root_configure(event)
+        assert app._resize_job != first
+
+    def test_configure_from_a_child_widget_is_ignored(self, app):
+        event = tk.Event()
+        event.widget = app.image_label
+        app._on_root_configure(event)
+        assert app._resize_job is None
+
+    def test_image_pane_absorbs_the_extra_space(self, app):
+        # Tk stretches the last pane by default, which starves the image.
+        assert app.main_paned.panecget(app.sidebar_container, "stretch") == "never"
+        assert app.main_paned.panecget(app.center_paned, "stretch") == "always"
+        assert app.center_paned.panecget(app.image_container, "stretch") == "always"
+        assert app.center_paned.panecget(app.text_panel, "stretch") == "never"
+
+    def test_text_pane_is_sized_by_width_when_beside_the_image(self, app):
+        app._apply_layout(LARGE)
+        assert app.center_paned.panecget(app.text_panel, "width") > 0
+        assert not app.center_paned.panecget(app.text_panel, "height")
+
+    def test_text_pane_is_sized_by_height_when_under_the_image(self, app):
+        app._apply_layout(MEDIUM)
+        assert app.center_paned.panecget(app.text_panel, "height") > 0
+        assert not app.center_paned.panecget(app.text_panel, "width")
+
+    def test_restored_sidebar_still_does_not_stretch(self, app):
+        app._apply_layout(COMPACT)
+        app._apply_layout(LARGE)
+        assert app.main_paned.panecget(app.sidebar_container, "stretch") == "never"
+
+    def test_scrollbar_shows_only_while_the_column_overflows(self, app):
+        app._on_sidebar_scrolled(0.0, 0.5)
+        assert app.sidebar_scrollbar.winfo_manager() == "pack"
+        app._on_sidebar_scrolled(0.0, 1.0)
+        assert app.sidebar_scrollbar.winfo_manager() == ""
+
+    def test_scrollbar_is_packed_before_the_canvas(self, app):
+        # Packed after it, the canvas has already claimed the whole cavity
+        # and the scrollbar is allocated no width at all.
+        app._on_sidebar_scrolled(0.0, 0.5)
+        assert app.sidebar_container.pack_slaves()[0] is app.sidebar_scrollbar
+
+
+class TestModelPreload:
+    def test_app_preloads_the_model_at_startup(self):
+        # Loading inside the first detection makes it look seconds slower
+        # than the rest; the app is idle at startup, so pay it there.
+        root = tk.Tk()
+        root.withdraw()
+        with patch.object(OCREngine, "preload") as preload:
+            app = TextRecognitionApp(root)
+        try:
+            preload.assert_called_once()
+        finally:
+            app.stop_capture()
+            app.engine.shutdown()
+            root.destroy()

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "text-detector"
-version = "2.0.0"
+version = "2.1.0"
 description = "A real-time text recognition application using computer vision"
 readme = "README.md"
 license = {text = "MIT"}
@@ -29,6 +29,10 @@ text-detector = "text_detector.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["text_detector*"]
+
+[tool.setuptools.package-data]
+text_detector = ["assets/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["src/tests"]

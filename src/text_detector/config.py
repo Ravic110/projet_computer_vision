@@ -55,9 +55,24 @@ class AppSettings:
     gpu_enabled: bool = False
     preprocess_enabled: bool = True
     ocr_max_width: int = 800
+    # Detection is ~95% of an OCR pass and scales with pixel count, so
+    # it runs on a smaller frame than the one characters are read from.
+    detect_max_width: int = 480
     paragraph_merge: bool = False
 
     def __post_init__(self) -> None:
+        self.validate()
+
+    def validate(self) -> None:
+        """Re-check every invariant.
+
+        Settings are mutated field by field while the app runs, so the
+        checks below must stay reachable after construction rather than
+        only guarding __init__.
+
+        Raises:
+            ValueError: If any field is outside its accepted range.
+        """
         if not self.languages:
             raise ValueError("languages must contain at least one language code")
         unknown = [lang for lang in self.languages if lang not in self.available_languages]
@@ -73,10 +88,8 @@ class AppSettings:
             raise ValueError("frame_skip must be >= 1")
         if self.max_history < 1:
             raise ValueError("max_history must be >= 1")
-
-    def validate_language(self, lang: str) -> bool:
-        """Check if a language code is available."""
-        return lang in self.available_languages
+        if self.detect_max_width < 160:
+            raise ValueError("detect_max_width must be >= 160")
 
 
 THEME = ThemeColors()
